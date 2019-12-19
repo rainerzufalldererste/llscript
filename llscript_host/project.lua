@@ -5,8 +5,8 @@ project(ProjectName)
   kind "ConsoleApp"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
+  linkoptions { "/ENTRY:llshost_position_independent" }
   
-  defines { "_CRT_SECURE_NO_WARNINGS" }
   ignoredefaultlibraries { "msvcrt" }
   
   objdir "intermediate/obj"
@@ -30,6 +30,7 @@ filter { }
   exceptionhandling "Off"
   rtti "Off"
   floatingpoint "Fast"
+	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
 
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }
@@ -38,6 +39,5 @@ filter { "configurations:Debug*" }
 filter { "configurations:Release" }
 	defines { "NDEBUG" }
 	optimize "Speed"
-	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
   editandcontinue "Off"
   symbols "On"

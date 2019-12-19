@@ -36,12 +36,11 @@ typedef struct
   const lls_code_t *pCode;
   uint64_t stackSize;
   uint64_t *pStack;
-  void *pVirtualFree; // should be NULL if you allocated the stack.
-  void *pLoadLibrary, *pGetProcAddress, *pHeapAlloc, *pHeapFree, *pHeapDestroy, *pHeapHandle;
+  void *pLoadLibrary, *pGetProcAddress, *pHeapAlloc, *pHeapRealloc, *pHeapFree, *pHeapDestroy, *pHeapHandle;
 } llshost_state_t;
 
-// If no code specified this function will look for `LLS_CODE_START_PATTERN` after the function and 
-void llshost_position_independent(const lls_code_t *pCode);
+// This function will look for `LLS_CODE_START_PATTERN` after the function.
+void llshost_position_independent();
 
 #define LLS_CODE_START_PATTERN (0x31719E1203636F37)
 #define LLS_DEFUALT_STACK_SIZE (0x1000000) // 16 MB

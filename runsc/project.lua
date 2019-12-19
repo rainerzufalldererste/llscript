@@ -1,17 +1,15 @@
-ProjectName = "llscript_asm"
+ProjectName = "runsc"
 project(ProjectName)
 
   --Settings
   kind "ConsoleApp"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
-  linkoptions { "/ENTRY:__lls__call_func" }
-  
-  ignoredefaultlibraries { "msvcrt" }
+  defines { "_CRT_SECURE_NO_WARNINGS" }
   
   objdir "intermediate/obj"
 
-  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc", "src/*.asm" }
+  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc" }
   files { "project.lua" }
   
   includedirs { "src" }
