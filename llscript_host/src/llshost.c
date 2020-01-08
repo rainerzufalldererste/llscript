@@ -21,7 +21,7 @@
 
 __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 {
-  uint64_t *pStack = pState->pStack;
+  uint8_t *pStack = pState->pStack;
   lls_code_t *pCodePtr = pState->pCode;
 
   uint64_t iregister[8];
@@ -107,11 +107,11 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     {
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
-      const uint64_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
+      const uint8_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
       pCodePtr += 8;
 
       if (target_register < 8)
-        iregister[target_register] = *pStackPtr;
+        iregister[target_register] = *(const uint64_t *)pStackPtr;
       else IF_LAST_OPT(target_register < 16)
         fregister[target_register - 8] = *(const double *)pStackPtr;
       ASSERT_NO_ELSE;
@@ -121,10 +121,10 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_STACK_STACK:
     {
-      uint64_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
+      uint8_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
       pCodePtr += 8;
 
-      const uint64_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
+      const uint8_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
       pCodePtr += 8;
 
       *pTargetStackPtr = *pSourceStackPtr;
@@ -200,13 +200,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
       if (source_register < 8)
       {
-        *pStack = iregister[source_register];
-        ++pStack;
+        *(uint64_t *)pStack = iregister[source_register];
+        pStack += 8;
       }
       else IF_LAST_OPT(source_register < 16)
       {
-        *pStack = *(uint64_t *)&fregister[source_register - 8];
-        ++pStack;
+        *(uint64_t *)pStack = *(uint64_t *)&fregister[source_register - 8];
+        pStack += 8;
       }
       ASSERT_NO_ELSE
 
@@ -220,13 +220,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
       if (target_register < 8)
       {
-        --pStack;
-        iregister[target_register] = *pStack;
+        pStack -= 8;
+        iregister[target_register] = *(const uint64_t *)pStack;
       }
       else IF_LAST_OPT(target_register < 16)
       {
-        --pStack;
-        fregister[target_register - 8] = *(double *)pStack;
+        pStack -= 8;
+        fregister[target_register - 8] = *(const double *)pStack;
       }
       ASSERT_NO_ELSE
 
@@ -237,7 +237,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     {
       uint64_t(*__lls__call_func)(const uint64_t *pStack) = pState->pCallFuncShellcode;
 
-      const uint64_t result = __lls__call_func(pStack);
+      const uint64_t result = __lls__call_func((const uint64_t *)pStack);
 
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;

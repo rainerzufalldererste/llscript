@@ -35,7 +35,7 @@ typedef struct
   llshost_host_function_t *pHostFunctions; // null terminated list of available host functions.
   const lls_code_t *pCode;
   uint64_t stackSize;
-  uint64_t *pStack;
+  uint8_t *pStack;
   void *pLoadLibrary, *pGetProcAddress, *pHeapAlloc, *pHeapRealloc, *pHeapFree, *pHeapDestroy, *pHeapHandle;
 } llshost_state_t;
 

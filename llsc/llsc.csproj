@@ -19,7 +19,8 @@
     <OutputPath>..\builds\bin\</OutputPath>
     <BaseIntermediateOutputPath>intermediate\obj\x64\Debug\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-    <DefineConstants></DefineConstants>
+    <DefineConstants>
+    </DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -31,7 +32,8 @@
     <OutputPath>..\builds\bin\</OutputPath>
     <BaseIntermediateOutputPath>intermediate\obj\x64\Release\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-    <DefineConstants></DefineConstants>
+    <DefineConstants>
+    </DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -40,7 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="project.lua" />
-    <Compile Include="src\Main.cs" />
+    <Compile Include="src\Compiler.cs" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>
