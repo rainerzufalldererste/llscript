@@ -6,5 +6,6 @@ solution "llscript"
 
   dofile "llscript_host/project.lua"
   dofile "llscript_asm/project.lua"
+  dofile "llscript_dbg/project.lua"
   dofile "llsc/project.lua"
   dofile "runsc/project.lua"

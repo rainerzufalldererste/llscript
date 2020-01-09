@@ -42,6 +42,8 @@ typedef struct
 // This function will look for `LLS_CODE_START_PATTERN` after the function.
 void llshost_position_independent();
 
+void llshost(void *pCodePtr, void *pCallFunc);
+
 #define LLS_CODE_START_PATTERN (0x31719E1203636F37)
 #define LLS_DEFUALT_STACK_SIZE (0x1000000) // 16 MB
 

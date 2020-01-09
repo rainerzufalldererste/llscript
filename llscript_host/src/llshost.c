@@ -19,6 +19,39 @@
 #define IF_LAST_OPT(...)
 #endif
 
+#ifdef LLS_DEBUG_MODE
+// Debug Mode Is NOT POSITION INDEPENDENT!
+#include <stdio.h>
+#include <inttypes.h>
+#include <stdint.h>
+
+#define LOG_INSTRUCTION_NAME(x) do { if (!silent) printf("0x%016" PRIX64 ": " #x " ", (uint64_t)(pCodePtr - 1)); } while (0)
+#define LOG_U8(x) do { if (!silent) printf("%" PRIu8 "", (uint8_t)(x)); } while (0)
+#define LOG_U64(x) do { if (!silent) printf("%" PRIu64 " (0x%" PRIX64 ")", (uint64_t)(x), (uint64_t)(x)); } while (0)
+#define LOG_I64(x) do { if (!silent) printf("%" PRIi64 " (0x%" PRIX64 ")", (int64_t)(x), (int64_t)(x)); } while (0)
+#define LOG_F64(x) do { if (!silent) printf("%f", (double)(x)); } while (0)
+#define LOG_DELIMITER() do { if (!silent) fputs(", ", stdout); } while (0)
+#define LOG_INFO_START() do { if (!silent) fputs(" -> (", stdout); } while (0)
+#define LOG_INFO_END() do { if (!silent) fputs(")", stdout); } while (0)
+#define LOG_END() do { if (!silent) puts(""); } while (0)
+#else
+#define LOG_INSTRUCTION_NAME(x)
+#define LOG_U8(x) 
+#define LOG_U64(x)
+#define LOG_I64(x)
+#define LOG_F64(x)
+#define LOG_DELIMITER()
+#define LOG_INFO_START()
+#define LOG_INFO_END()
+#define LOG_END()
+#endif
+
+__forceinline void CopyBytes(void *pTarget, const void *pSource, size_t bytes)
+{
+  for (int64_t i = (int64_t)bytes - 1; i >= 0; i--)
+    ((uint8_t *)pTarget)[i] = ((const uint8_t *)pSource)[i];
+}
+
 __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 {
   uint8_t *pStack = pState->pStack;
@@ -26,45 +59,168 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
   uint64_t iregister[8];
   double fregister[8];
-  bool cmp;
+  bool cmp = false;
+
+#ifdef LLS_DEBUG_MODE
+  bool silent = false;
+  bool stepInstructions = true;
+  bool stepOut = false;
+
+  memset(iregister, 0, sizeof(iregister));
+  memset(fregister, 0, sizeof(fregister));
+
+  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'r' for registers\n\t'p' for stack bytes.\n\t's' toggle silent.\n\n");
+#endif
 
   while (1)
   {
+#ifdef LLS_DEBUG_MODE
+    if (stepInstructions)
+    {
+      while (1)
+      {
+        fputs(">> ", stdout);
+        const char c = _getch();
+
+        switch (c)
+        {
+        case 'c':
+          stepInstructions = false;
+          goto continue_execution;
+
+        case 'n':
+          goto continue_execution;
+
+        case 'f':
+          stepOut = true;
+          stepInstructions = false;
+          goto continue_execution;
+
+        case 'r':
+          puts("Registers:");
+          for (size_t i = 0; i < 8; i++)
+            printf("\t% 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
+
+          for (size_t i = 0; i < 8; i++)
+            printf("\t% 3" PRIu64 ": %d\n", i + 8, fregister[i]);
+
+          printf("\tCMP: %" PRIu8 "\n", cmp);
+          printf("\nStack Offset: %" PRIu64 "\n", (size_t)pStack - (size_t)pState->pStack);
+          puts("");
+          break;
+
+        case 'p':
+          {
+            const size_t offset = (size_t)pStack - (size_t)pState->pStack;
+            printf("Stack Offset: %" PRIu64 "\n", offset);
+
+            uint8_t *pStackInspect = pStack - 64;
+
+            if (pStackInspect < pState->pStack)
+              pStackInspect = pState->pStack;
+
+            for (size_t i = 0; i < 64; i += 8)
+            {
+              if (i >= offset)
+                break;
+
+              printf("\n -%02" PRIu64 ": ", (uint64_t)(pStack - (pStackInspect + i)));
+
+              for (size_t j = 0; j < 8; j++)
+              {
+                if (i + j >= offset)
+                  fputs("   ", stdout);
+                else
+                  printf("%02" PRIX8 " ", pStackInspect[i + j]);
+              }
+
+              fputs("\t", stdout);
+
+              for (size_t j = 0; j < 8; j++)
+              {
+                if (i + j >= offset)
+                  break;
+
+                const uint8_t value = pStackInspect[i + j];
+
+                if (value >= 0x20)
+                  printf("%c", (char)value);
+                else
+                  fputs("?", stdout);
+              }
+            }
+
+            puts("\n");
+
+            break;
+          }
+
+        case 's':
+          silent = ~silent;
+          break;
+
+        default:;
+        }
+      }
+
+    continue_execution:
+      ;
+    }
+#endif
+
     const lls_code_t opcode = *pCodePtr;
     pCodePtr++;
 
     switch (opcode)
     {
     case LLS_OP_EXIT:
+      LOG_INSTRUCTION_NAME(LLS_OP_EXIT);
+      LOG_END();
       return;
 
     case LLS_OP_MOV_IMM_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_IMM_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_DELIMITER();
 
       if (target_register < 8)
       {
         iregister[target_register] = *(uint64_t *)pCodePtr;
+        LOG_U64(*(uint64_t *)pCodePtr);
         pCodePtr += 8;
       }
       else IF_LAST_OPT(target_register < 16)
       {
         fregister[target_register - 8] = *(double *)pCodePtr;
+        LOG_F64(*(double *)pCodePtr);
         pCodePtr += 8;
       }
       ASSERT_NO_ELSE;
 
+      LOG_END();
       break;
     }
 
     case LLS_OP_MOV_REGISTER_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(target_register);
+      LOG_DELIMITER();
+
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
 
       if (target_register < 8)
       {
@@ -89,10 +245,19 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_REGISTER_STACK:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER_STACK);
+
       uint64_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
+
+      LOG_DELIMITER();
+
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
 
       if (source_register < 8)
         *pStackPtr = iregister[source_register];
@@ -105,17 +270,27 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_REGISTER_STACK_N_BYTES:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER_STACK_N_BYTES);
+
       const uint8_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
+
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
       const uint8_t bytes = *pCodePtr;
       pCodePtr++;
 
+      LOG_DELIMITER();
+      LOG_U8(source_register);
+      LOG_DELIMITER();
+      LOG_U8(bytes);
+      LOG_END();
+
       if (source_register < 8)
-        memcpy(pStackPtr, &iregister[source_register], bytes);
+        CopyBytes(pStackPtr, &iregister[source_register], bytes);
       else IF_LAST_OPT(source_register < 16)
-        memcpy(pStackPtr, &fregister[source_register - 8], bytes);
+        CopyBytes(pStackPtr, &fregister[source_register - 8], bytes);
       ASSERT_NO_ELSE;
 
       break;
@@ -123,10 +298,19 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_STACK_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_STACK_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_DELIMITER();
+
       const uint8_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
+
+      LOG_END();
 
       if (target_register < 8)
         iregister[target_register] = *(const uint64_t *)pStackPtr;
@@ -139,11 +323,19 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_STACK_STACK:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_STACK_STACK);
+
       uint8_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
 
+      LOG_DELIMITER();
+
       const uint8_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
+
+      LOG_END();
 
       *pTargetStackPtr = *pSourceStackPtr;
 
@@ -152,11 +344,22 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_REGISTER__PTR_IN_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER__PTR_IN_REGISTER);
+
       const lls_code_t target_ptr_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(target_ptr_register);
+      LOG_INFO_START();
+      LOG_U64(iregister[target_ptr_register]);
+      LOG_INFO_END();
+      LOG_DELIMITER();
+
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
 
       void *pTarget;
 
@@ -175,14 +378,28 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES);
+
       const lls_code_t target_ptr_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_ptr_register);
+      LOG_INFO_START();
+      LOG_U64(iregister[target_ptr_register]);
+      LOG_INFO_END();
+      LOG_DELIMITER();
 
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(source_register);
+      LOG_DELIMITER();
+
       const uint8_t bytes = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(bytes);
+      LOG_END();
 
       void *pTarget;
 
@@ -191,9 +408,9 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       ASSERT_NO_ELSE;
 
       if (source_register < 8)
-        memcpy(pTarget, &iregister[source_register], bytes);
+        CopyBytes(pTarget, &iregister[source_register], bytes);
       else IF_LAST_OPT(source_register < 16)
-        memcpy(pTarget, &fregister[source_register - 8], bytes);
+        CopyBytes(pTarget, &fregister[source_register - 8], bytes);
       ASSERT_NO_ELSE;
 
       break;
@@ -201,11 +418,22 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_MOV_PTR_IN_REGISTER__REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_PTR_IN_REGISTER__REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(target_register);
+      LOG_DELIMITER();
+
       const lls_code_t source_ptr_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(source_ptr_register);
+      LOG_INFO_START();
+      LOG_U64(iregister[source_ptr_register]);
+      LOG_INFO_END();
+      LOG_END();
 
       const void *pDestination;
 
@@ -224,11 +452,19 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_LEA_STACK_TO_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_LEA_STACK_TO_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(target_register);
+      LOG_DELIMITER();
+
       const uint64_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
+
+      LOG_END();
 
       IF_LAST_OPT(target_register < 8)
         iregister[target_register] = (uint64_t)pSourceStackPtr;
@@ -239,8 +475,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_PUSH_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_PUSH_REGISTER);
+
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
 
       if (source_register < 8)
       {
@@ -259,8 +500,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_POP_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_POP_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_END();
 
       if (target_register < 8)
       {
@@ -277,14 +523,122 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_STACK_INC_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_STACK_INC_IMM);
+
+      const int64_t imm = *pCodePtr;
+      pCodePtr += sizeof(int64_t);
+
+      LOG_I64(imm);
+      LOG_END();
+
+      pStack += imm;
+
+      break;
+    }
+
+    case LLS_OP_STACK_INC_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_STACK_INC_REGISTER);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(target_register);
+
+      int64_t offset;
+
+      IF_LAST_OPT(target_register < 8)
+        offset = iregister[target_register];
+      ASSERT_NO_ELSE;
+
+      LOG_INFO_START();
+      LOG_I64(offset);
+      LOG_INFO_END();
+      LOG_END();
+
+      pStack += offset;
+
+      break;
+    }
+
+    case LLS_OP_STACK_DEC_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_STACK_DEC_IMM);
+
+      const int64_t imm = *pCodePtr;
+      pCodePtr += sizeof(int64_t);
+
+      LOG_I64(imm);
+      LOG_END();
+
+      pStack -= imm;
+
+      break;
+    }
+
+    case LLS_OP_STACK_DEC_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_STACK_DEC_REGISTER);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(target_register);
+
+      int64_t offset;
+
+      IF_LAST_OPT(target_register < 8)
+        offset = iregister[target_register];
+      ASSERT_NO_ELSE;
+
+      LOG_INFO_START();
+      LOG_I64(offset);
+      LOG_INFO_END();
+      LOG_END();
+
+      pStack -= offset;
+
+      break;
+    }
+
+    case LLS_OP_UADD_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_UADD_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_DELIMITER();
+
+      const uint64_t imm = *(uint64_t *)pCodePtr;
+      pCodePtr += sizeof(uint64_t);
+
+      LOG_U64(imm);
+      LOG_END();
+
+      IF_LAST_OPT(target_register < 8)
+        iregister[target_register] += imm;
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER:
     {
       uint64_t(*__lls__call_func)(const uint64_t *pStack) = pState->pCallFuncShellcode;
 
       const uint64_t result = __lls__call_func((const uint64_t *)pStack);
 
+      LOG_INSTRUCTION_NAME(LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER);
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_END();
 
       if (target_register < 8)
       {
@@ -303,11 +657,19 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
     case LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER:
     {
+      LOG_INSTRUCTION_NAME(LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER);
+
       const lls_code_t id_register = *pCodePtr;
       pCodePtr++;
 
+      LOG_U8(id_register);
+      LOG_DELIMITER();
+
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
+
+      LOG_U8(target_register);
+      LOG_END();
 
       switch (id_register)
       {
@@ -368,6 +730,11 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     }
 
     default:
+      LOG_INSTRUCTION_NAME(INVALID_INSTRUCTION);
+      LOG_INFO_START();
+      LOG_U8(*(pCodePtr - 1));
+      LOG_INFO_END();
+      LOG_END();
       __debugbreak();
     }
   }
@@ -549,6 +916,21 @@ void llshost_position_independent()
     ((uint8_t *)&state)[i] = 0;
 
   llshost_FindCode(&state);
+  llshost_Setup(&state);
+  llshost_EvaluateCode(&state);
+  llshost_Cleanup(&state);
+}
+
+void llshost(void *pCodePtr, void *pCallFunc)
+{
+  llshost_state_t state;
+
+  for (size_t i = 0; i < sizeof(state); i++)
+    ((uint8_t *)&state)[i] = 0;
+
+  state.pCode = pCodePtr; 
+  state.pCallFuncShellcode = pCallFunc;
+
   llshost_Setup(&state);
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
