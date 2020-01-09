@@ -25,7 +25,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 
-#define LOG_INSTRUCTION_NAME(x) do { if (!silent) printf("0x%016" PRIX64 ": " #x " ", (uint64_t)(pCodePtr - 1)); } while (0)
+#define LOG_INSTRUCTION_NAME(x) do { if (!silent) printf("\r% 16" PRIX64 ": " #x " ", (uint64_t)(pCodePtr - 1 - pState->pCode)); } while (0)
 #define LOG_U8(x) do { if (!silent) printf("%" PRIu8 "", (uint8_t)(x)); } while (0)
 #define LOG_U64(x) do { if (!silent) printf("%" PRIu64 " (0x%" PRIX64 ")", (uint64_t)(x), (uint64_t)(x)); } while (0)
 #define LOG_I64(x) do { if (!silent) printf("%" PRIi64 " (0x%" PRIX64 ")", (int64_t)(x), (int64_t)(x)); } while (0)
@@ -69,7 +69,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
   memset(iregister, 0, sizeof(iregister));
   memset(fregister, 0, sizeof(fregister));
 
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'r' for registers\n\t'p' for stack bytes.\n\t's' toggle silent.\n\n");
+  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'r' for registers\n\t'p' for stack bytes.\n\t's' toggle silent.\n\t'x' to quit.\n\n");
 #endif
 
   while (1)
@@ -158,6 +158,9 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         case 's':
           silent = ~silent;
           break;
+
+        case 'x':
+          return;
 
         default:;
         }
