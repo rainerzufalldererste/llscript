@@ -4,8 +4,101 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
+/*
+ * TODO: 
+ * - Values don't change their stack offset when entering a scope / moving the stack position.
+ * - Move all stack sizes to scopes from functions.
+ */
+
 namespace llsc
 {
+  public enum ByteCodeInstructions
+  {
+    LLS_OP_EXIT = 0,
+
+    LLS_OP_MOV_IMM_REGISTER,
+    LLS_OP_MOV_REGISTER_REGISTER,
+    LLS_OP_MOV_REGISTER_STACK,
+    LLS_OP_MOV_STACK_REGISTER,
+    LLS_OP_MOV_STACK_STACK,
+    LLS_OP_MOV_REGISTER__PTR_IN_REGISTER,
+    LLS_OP_MOV_PTR_IN_REGISTER__REGISTER,
+
+    LLS_OP_MOV_REGISTER_STACK_N_BYTES,
+    LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES,
+
+    LLS_OP_LEA_STACK_TO_REGISTER,
+
+    LLS_OP_PUSH_REGISTER,
+    LLS_OP_POP_REGISTER,
+
+    LLS_OP_STACK_INC_IMM,
+    LLS_OP_STACK_INC_REGISTER,
+    LLS_OP_STACK_DEC_IMM,
+    LLS_OP_STACK_DEC_REGISTER,
+
+    LLS_OP_UADD_IMM,
+    LLS_OP_UADD_REGISTER,
+    LLS_OP_USUB_IMM,
+    LLS_OP_USUB_REGISTER,
+    LLS_OP_UMUL_IMM,
+    LLS_OP_UMUL_REGISTER,
+    LLS_OP_UDIV_IMM,
+    LLS_OP_UDIV_REGISTER,
+    LLS_OP_UMOD_IMM,
+    LLS_OP_UMOD_REGISTER,
+
+    LLS_OP_ADD_IMM,
+    LLS_OP_ADD_REGISTER,
+    LLS_OP_SUB_IMM,
+    LLS_OP_SUB_REGISTER,
+    LLS_OP_MUL_IMM,
+    LLS_OP_MUL_REGISTER,
+    LLS_OP_DIV_IMM,
+    LLS_OP_DIV_REGISTER,
+    LLS_OP_MOD_IMM,
+    LLS_OP_MOD_REGISTER,
+
+    LLS_OP_BSL_REGISTER,
+    LLS_OP_BSR_REGISTER,
+    LLS_OP_AND_REGISTER,
+    LLS_OP_OR_REGISTER,
+    LLS_OP_XOR_REGISTER,
+
+    LLS_OP_LOGICAL_AND_REGISTER,
+    LLS_OP_LOGICAL_OR_REGISTER,
+
+    LLS_OP_INV,
+    LLS_OP_NOT,
+
+    LLS_OP_INEGATE,
+    LLS_OP_FNEGATE,
+
+    LLS_OP_CMP_EQ_IMM,
+    LLS_OP_CMP_GT_IMM,
+    LLS_OP_CMP_LT_IMM,
+
+    LLS_OP_CMP_EQ_REGISTER,
+    LLS_OP_CMP_GT_REGISTER,
+    LLS_OP_CMP_LT_REGISTER,
+
+    LLS_OP_JMP,
+    LLS_OP_JMP_RELATIVE_IMM,
+    LLS_OP_JMP_RELATIVE_REGISTER,
+
+    LLS_OP_JUMP_CMP_TRUE,
+    LLS_OP_JUMP_CMP_TRUE_RELATIVE_IMM,
+    LLS_OP_JUMP_CMP_TRUE_RELATIVE_REGISTER,
+
+    LLS_OP_CALL_INTERNAL_IMM,
+    LLS_OP_CALL_INTERNAL_REGISTER,
+    LLS_OP_RETURN_INTERNAL,
+
+    LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER,
+
+    LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER,
+  };
+
   public abstract class Node
   {
     public readonly string file;
@@ -164,7 +257,8 @@ namespace llsc
     public readonly string value;
 
     // Includes trailing null character.
-    public readonly int length;
+    public readonly long length;
+    public readonly byte[] bytes;
 
     public NStringValue(string value, string file, int line) : base(file, line)
     {
@@ -223,7 +317,9 @@ namespace llsc
         }
       }
 
-      this.length = Encoding.UTF8.GetByteCount(this.value) + 1;
+
+      this.bytes = Encoding.UTF8.GetBytes(this.value + "\0");
+      this.length = bytes.LongLength;
     }
 
     public override string ToString() => $"string value '{value}' ({length} Bytes)";
@@ -330,7 +426,7 @@ namespace llsc
 
   public abstract class CType
   {
-    public abstract ulong GetSize();
+    public abstract long GetSize();
 
     public override bool Equals(object obj) => false;
 
@@ -353,7 +449,7 @@ namespace llsc
 
     private VoidCType() { }
 
-    public override ulong GetSize() => 0;
+    public override long GetSize() => 0;
 
     public override string ToString() => "void";
 
@@ -382,7 +478,7 @@ namespace llsc
 
     public override int GetHashCode() => type.GetHashCode();
 
-    public override ulong GetSize()
+    public override long GetSize()
     {
       switch (type)
       {
@@ -408,6 +504,8 @@ namespace llsc
           throw new Exception("Invalid Type");
       }
     }
+
+    public bool IsFloat() => type == BuiltInTypes.f64 || type == BuiltInTypes.f32;
     
     public override string ToString() => type.ToString();
   }
@@ -421,7 +519,7 @@ namespace llsc
       this.pointsTo = pointsTo;
     }
 
-    public override ulong GetSize() => 8;
+    public override long GetSize() => 8;
     public override bool Equals(object obj) => (obj is PtrCType && (obj as PtrCType).pointsTo == pointsTo);
 
     public override int GetHashCode() => -(pointsTo.GetHashCode() + 1);
@@ -432,15 +530,15 @@ namespace llsc
   public class ArrayCType : CType
   {
     public readonly CType type;
-    public readonly ulong count;
+    public readonly long count;
 
-    public ArrayCType(CType type, ulong count)
+    public ArrayCType(CType type, long count)
     {
       this.type = type;
       this.count = count;
     }
 
-    public override ulong GetSize() => count * type.GetSize();
+    public override long GetSize() => count * type.GetSize();
 
     public override bool Equals(object obj) => (obj is ArrayCType && (obj as ArrayCType).type == type && (obj as ArrayCType).count == count);
 
@@ -460,7 +558,7 @@ namespace llsc
       parameterTypes = parameters.ToArray();
     }
 
-    public override ulong GetSize() => 8;
+    public override long GetSize() => 8;
 
     public override bool Equals(object obj)
     {
@@ -514,7 +612,7 @@ namespace llsc
     public readonly int line;
     public readonly string name;
     public readonly StructAttribute[] attributes;
-    private readonly ulong size;
+    private readonly long size;
 
     public StructCType(string name, IEnumerable<StructAttribute> attributes, string file, int line)
     {
@@ -537,7 +635,7 @@ namespace llsc
       }
     }
 
-    public override ulong GetSize()
+    public override long GetSize()
     {
       return size;
     }
@@ -562,7 +660,7 @@ namespace llsc
   {
     public readonly string name;
     public readonly CType type;
-    public ulong offset;
+    public long offset;
 
     public readonly string file;
     public readonly int line;
@@ -583,16 +681,21 @@ namespace llsc
     public readonly CType type;
     public readonly string file;
     public readonly int line;
+    public bool isInitialized;
+    public Position position;
+    public bool hasPosition = false;
 
     public int remainingReferences = 0;
     public readonly bool isConst;
+    public int lastTouchedInstructionCount = 0;
 
-    public CValue(string file, int line, CType type, bool isConst)
+    public CValue(string file, int line, CType type, bool isConst, bool isInitialized)
     {
       this.file = file;
       this.line = line;
       this.type = type;
       this.isConst = isConst;
+      this.isInitialized = isInitialized;
     }
   }
 
@@ -601,7 +704,7 @@ namespace llsc
     public readonly ulong uvalue;
     public readonly long ivalue;
 
-    public CConstValue(NIntegerValue value, CType type) : base(value.file, value.line, type, true)
+    public CConstValue(NIntegerValue value, CType type) : base(value.file, value.line, type, true, true)
     {
       if (!(type is BuiltInCType))
         Compiler.Error($"Invalid Constant Value. Integer value cannot be assigned to type '{ type.ToString() }'.", value.file, value.line);
@@ -652,11 +755,18 @@ namespace llsc
   public class CNamedValue : CValue
   {
     public readonly string name;
-    public int stackOffset;
+    public bool hasStackOffset = false;
+    public long homeStackOffset;
+    public bool modifiedSinceLastHome = false;
 
-    public CNamedValue(NName name, CType type, bool isConst) : base(name.file, name.line, type, isConst)
+    public CNamedValue(NName name, CType type, bool isConst, bool isInitialized) : base(name.file, name.line, type, isConst, isInitialized)
     {
       this.name = name.name;
+    }
+
+    public CNamedValue(string name, CType type, bool isConst, bool isInitialized, string file, int line) : base(file, line, type, isConst, isInitialized)
+    {
+      this.name = name;
     }
   }
 
@@ -777,6 +887,51 @@ namespace llsc
     }
   }
 
+  public struct Position
+  {
+    public bool inRegister;
+    public int registerIndex;
+    public long stackOffsetForward;
+
+    public static Position Register(int registerIndex)
+    {
+      Position ret = new Position();
+
+      ret.inRegister = true;
+      ret.registerIndex = registerIndex;
+
+      return ret;
+    }
+
+    public static Position StackOffset(long stackOffsetForward)
+    {
+      Position ret = new Position();
+
+      ret.inRegister = false;
+      ret.stackOffsetForward = stackOffsetForward;
+
+      return ret;
+    }
+  }
+
+  public class FunctionParameter
+  {
+    public readonly string file;
+    public readonly int line;
+    public readonly string name;
+    public readonly CType type;
+    public readonly CNamedValue value;
+
+    public FunctionParameter(CType type, string name, string file, int line)
+    {
+      this.file = file;
+      this.line = line;
+      this.name = name;
+      this.type = type;
+      this.value = new CNamedValue(name, type, false, true, file, line);
+    }
+  }
+
   public class CFunction
   {
     public readonly string file;
@@ -784,38 +939,455 @@ namespace llsc
     public readonly string name;
 
     public readonly CType returnType;
-    public readonly Tuple<string, CType>[] parameters;
+    public readonly FunctionParameter[] parameters;
 
-    public CFunction(string name, CType returnType, IEnumerable<Tuple<string, CType>> parameters, string file, int line)
+    public readonly Value<long> minStackSize = new Value<long>(0);
+    public List<Node> nodes;
+    public Scope scope;
+
+    public CFunction(string name, CType returnType, IEnumerable<FunctionParameter> parameters, string file, int line)
     {
       this.name = name;
       this.returnType = returnType;
       this.parameters = parameters.ToArray();
       this.file = file;
       this.line = line;
+
+      minStackSize.value = 8; // Return Address.
+
+      // + Return Value Ptr if not void
+      if (!(returnType is VoidCType))
+        minStackSize.value += 8;
+
+      int intRegistersTaken = 0;
+      int floatRegistersTaken = 0;
+
+      foreach (var param in this.parameters)
+      {
+        if (param.type is VoidCType)
+        {
+          Compiler.Error($"Cannot use type '{param.type}' for function parameters.", param.file, param.line);
+        }
+        else if (param.type is BuiltInCType)
+        {
+          var type = param.type as BuiltInCType;
+
+          if (type.IsFloat())
+          {
+            if (floatRegistersTaken < Compiler.FloatRegisters)
+            {
+              param.value.position = Position.Register(Compiler.IntegerRegisters + floatRegistersTaken);
+              floatRegistersTaken++;
+              continue;
+            }
+          }
+          else
+          {
+            if (intRegistersTaken < Compiler.IntegerRegisters)
+            {
+              param.value.position = Position.Register(intRegistersTaken);
+              intRegistersTaken++;
+              continue;
+            }
+          }
+        }
+        else if (param.type is PtrCType)
+        {
+          if (intRegistersTaken < Compiler.IntegerRegisters)
+          {
+            param.value.position = Position.Register(intRegistersTaken);
+            intRegistersTaken++;
+            continue;
+          }
+        }
+
+        // Whatever doesn't call 'continue' will be dealt with here:
+        // Value on stack.
+        param.value.position = Position.StackOffset(minStackSize.value);
+        param.value.hasPosition = true;
+        minStackSize.value += param.type.GetSize();
+      }
+    }
+
+    public override string ToString()
+    {
+      string ret = $"function {returnType} {name} (";
+
+      for (int i = 0; i < parameters.Length; i++)
+      {
+        if (i > 0)
+          ret += ", ";
+
+        ret += $"{parameters[i].type} {parameters[i].name}";
+      }
+      
+      return ret + ")";
     }
   }
 
-  public struct LabelReference
+  public class PatchValue
   {
     public readonly int patchValueIndex;
-    public readonly int byteCodeIndexPosition;
+    protected readonly ulong patchedValue;
 
-    public LabelReference(int patchValueIndex, int byteCodeIndexPosition)
+    public PatchValue(int patchValueIndex, ulong patchedValue)
     {
       this.patchValueIndex = patchValueIndex;
-      this.byteCodeIndexPosition = byteCodeIndexPosition;
+      this.patchedValue = patchedValue;
+    }
+
+    public virtual ulong GetValue(ByteCodeState state)
+    {
+      return patchedValue;
+    }
+  }
+
+  public class StaticDataPatchValue : PatchValue
+  {
+    public StaticDataPatchValue(int patchValueIndex, ulong patchedValue) : base(patchValueIndex, patchedValue) { }
+
+    public override ulong GetValue(ByteCodeState state)
+    {
+      return state.staticDataStartPosition + patchedValue;
     }
   }
 
   public class ByteCodeState
   {
     public Dictionary<int, ulong> patchValues = new Dictionary<int, ulong>();
-    public List<LabelReference> valuesToPatch = new List<LabelReference>();
+    public List<PatchValue> valuesToPatch = new List<PatchValue>();
     public List<byte> byteCode = new List<byte>();
+    public List<byte> staticData = new List<byte>();
+    public List<LLInstruction> instructions = new List<LLInstruction>();
 
-    public CValue[] iregisters = new CValue[8];
-    public CValue[] fregisters = new CValue[8];
+    public CValue[] registers = new CValue[Compiler.IntegerRegisters + Compiler.FloatRegisters];
+
+    public int nextPatchIndex = 0;
+    public ulong staticDataStartPosition = 0;
+
+    public int GetFreeIntegerRegister(Value<long> stackSize)
+    {
+      for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
+        if (registers[i] == null)
+          return i;
+
+      for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
+        if (registers[i].remainingReferences == 0)
+          return i;
+
+      int oldestIndex = -1;
+      int oldestValue = 0;
+
+      // With Home.
+
+      for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
+      {
+        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        {
+          if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
+            return i;
+
+          if (registers[i].lastTouchedInstructionCount < oldestValue)
+          {
+            oldestValue = registers[i].lastTouchedInstructionCount;
+            oldestIndex = i;
+          }
+        }
+      }
+
+      if (oldestIndex < 0)
+      {
+        oldestIndex = 0;
+
+        for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
+        {
+          if (registers[i].lastTouchedInstructionCount < oldestValue)
+          {
+            oldestValue = registers[i].lastTouchedInstructionCount;
+            oldestIndex = i;
+          }
+        }
+      }
+
+      FreeUsedRegister(oldestIndex, stackSize);
+
+      return oldestIndex;
+    }
+
+    public void FreeRegister(int register, Value<long> stackSize)
+    {
+      if (registers[register] == null || registers[register].remainingReferences == 0)
+        return;
+
+      if (registers[register] is CNamedValue && (registers[register] as CNamedValue).hasStackOffset && !(registers[register] as CNamedValue).modifiedSinceLastHome)
+        return;
+
+      FreeUsedRegister(register, stackSize);
+    }
+
+    private void FreeUsedRegister(int register, Value<long> stackSize)
+    {
+      var size = registers[register].type.GetSize();
+
+      if (registers[register] is CNamedValue)
+      {
+        var namedValue = registers[register] as CNamedValue;
+
+        if (namedValue.hasStackOffset)
+        {
+          if (size == 8)
+            instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, namedValue.homeStackOffset));
+          else
+            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, namedValue.homeStackOffset, (byte)size));
+
+          namedValue.position.inRegister = false;
+          namedValue.position.stackOffsetForward = namedValue.homeStackOffset;
+          namedValue.modifiedSinceLastHome = false;
+        }
+        else
+        {
+          if (size == 8)
+            instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.value));
+          else
+            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.value, (byte)size));
+
+          namedValue.hasStackOffset = true;
+          namedValue.homeStackOffset = stackSize.value;
+
+          namedValue.position.inRegister = false;
+          namedValue.position.stackOffsetForward = namedValue.homeStackOffset;
+          namedValue.modifiedSinceLastHome = false;
+
+          stackSize.value += size;
+        }
+      }
+      else
+      {
+        if (size == 8)
+          instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.value));
+        else
+          instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.value, (byte)size));
+
+        registers[register].position.inRegister = false;
+        registers[register].position.stackOffsetForward = stackSize.value;
+
+        stackSize.value += size;
+      }
+    }
+  }
+  
+  public class Value<T>
+  {
+    public T value;
+
+    public Value(T value) => this.value = value;
+  }
+
+  public abstract class LLInstruction
+  {
+    public ulong position;
+
+    public ulong bytecodeSize { get; protected set; }
+
+    public LLInstruction(ulong bytecodeSize) => this.bytecodeSize = bytecodeSize;
+
+    /// <summary>
+    /// Should not be called if bytecodeSize == 0;
+    /// </summary>
+    /// <param name="byteCode">the byte code to append to.</param>
+    public abstract void AppendBytecode(ref List<byte> byteCode);
+
+    public virtual void AfterCodeGen() { }
+  }
+
+  public class LLI_StackIncrementImm : LLInstruction
+  {
+    readonly Value<long> value;
+    long offset = 0;
+
+    public LLI_StackIncrementImm(long value) : base(9)
+    {
+      this.value = new Value<long>(value);
+    }
+
+    public LLI_StackIncrementImm(Value<long> value, long offset = 0) : base(9)
+    {
+      this.value = value;
+      this.offset = offset;
+    }
+
+    public override void AfterCodeGen()
+    {
+      if (((long)this.value.value + offset) == 0)
+        base.bytecodeSize = 0;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_STACK_INC_IMM);
+      byteCode.AddRange(BitConverter.GetBytes(value.value - offset));
+    }
+  }
+
+  public class LLI_LoadEffectiveAddress_StackOffsetToRegister : LLInstruction
+  {
+    readonly Value<long> value;
+    readonly Value<long> offset;
+    readonly int register;
+
+    public LLI_LoadEffectiveAddress_StackOffsetToRegister(long value, long offset, int register) : base(10)
+    {
+      this.value = new Value<long>(value);
+      this.offset = new Value<long>(offset);
+      this.register = register;
+    }
+
+    public LLI_LoadEffectiveAddress_StackOffsetToRegister(Value<long> value, long offset, int register) : base(10)
+    {
+      this.value = value;
+      this.offset = new Value<long>(offset);
+      this.register = register;
+    }
+
+    public LLI_LoadEffectiveAddress_StackOffsetToRegister(Value<long> value, Value<long> offset, int register) : base(10)
+    {
+      this.value = value;
+      this.offset = offset;
+      this.register = register;
+    }
+    
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_LEA_STACK_TO_REGISTER);
+      byteCode.Add((byte)register);
+      byteCode.AddRange(BitConverter.GetBytes(value.value - offset.value));
+    }
+  }
+
+  public class LLI_MovRegisterToStackOffset : LLInstruction
+  {
+    readonly int register;
+    readonly Value<long> stackSize;
+    readonly long offset;
+
+    public LLI_MovRegisterToStackOffset(int register, Value<long> stackSize, long offset) : base(1 + 8 + 1)
+    {
+      this.register = register;
+      this.stackSize = stackSize;
+      this.offset = offset;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK);
+      byteCode.AddRange(BitConverter.GetBytes(stackSize.value - offset));
+      byteCode.Add((byte)register);
+    }
+  }
+
+  public class LLI_MovRegisterToStackOffset_NBytes : LLInstruction
+  {
+    readonly int register;
+    readonly Value<long> stackSize;
+    readonly long offset;
+    readonly int bytes;
+
+    public LLI_MovRegisterToStackOffset_NBytes(int register, Value<long> stackSize, long offset, int bytes) : base(1 + 8 + 1 + 1)
+    {
+      this.register = register;
+      this.stackSize = stackSize;
+      this.offset = offset;
+      this.bytes = bytes;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK_N_BYTES);
+      byteCode.AddRange(BitConverter.GetBytes(stackSize.value - offset));
+      byteCode.Add((byte)register);
+      byteCode.Add((byte)bytes);
+    }
+  }
+
+  public class LLI_MovPtrInRegisterFromRegister : LLInstruction
+  {
+    int targetPtrRegister, sourceValueRegister;
+
+    public LLI_MovPtrInRegisterFromRegister(int targetPtrRegister, int sourceValueRegister) : base(3)
+    {
+      this.targetPtrRegister = targetPtrRegister;
+      this.sourceValueRegister = sourceValueRegister;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER);
+      byteCode.Add((byte)targetPtrRegister);
+      byteCode.Add((byte)sourceValueRegister);
+    }
+  }
+
+  public class LLI_MovPtrInRegisterFromRegister_NBytes : LLInstruction
+  {
+    int targetPtrRegister, sourceValueRegister, bytes;
+
+    public LLI_MovPtrInRegisterFromRegister_NBytes(int targetPtrRegister, int sourceValueRegister, int bytes) : base(4)
+    {
+      this.targetPtrRegister = targetPtrRegister;
+      this.sourceValueRegister = sourceValueRegister;
+      this.bytes = bytes;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER);
+      byteCode.Add((byte)targetPtrRegister);
+      byteCode.Add((byte)sourceValueRegister);
+      byteCode.Add((byte)bytes);
+    }
+  }
+
+  public class LLI_MovImmToRegister : LLInstruction
+  {
+    int register;
+    byte[] value;
+
+    public LLI_MovImmToRegister(int register, byte[] value) : base(1 + 1 + 8)
+    {
+      this.register = register;
+      this.value = value;
+
+      if (this.value.Length != 8)
+        throw new Exception("Internal Compiler Error!");
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_IMM_REGISTER);
+      byteCode.Add((byte)register);
+      byteCode.AddRange(value);
+    }
+  }
+
+  public class LLI_UAddImm : LLInstruction
+  {
+    int register;
+    byte[] value;
+    public LLI_UAddImm(int register, byte[] value) : base(1 + 1 + 8)
+    {
+      this.register = register;
+      this.value = value;
+
+      if (this.value.Length != 8)
+        throw new Exception("Internal Compiler Error!");
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_UADD_IMM);
+      byteCode.Add((byte)register);
+      byteCode.AddRange(value);
+    }
   }
 
   public abstract class CInstruction
@@ -829,15 +1401,100 @@ namespace llsc
       this.line = line;
     }
 
-    public abstract void AppendBytecode(ref ByteCodeState byteCodeState);
+    public abstract void GetLLInstructions(ref ByteCodeState byteCodeState);
   }
+  
+  public class CInstruction_BeginFunction : CInstruction
+  {
+    private readonly CFunction function;
+
+    public CInstruction_BeginFunction(CFunction function) : base(function.file, function.line)
+    {
+      this.function = function;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      for (int i = 0; i < byteCodeState.registers.Length; i++)
+        byteCodeState.registers[i] = null;
+
+      foreach (var parameter in function.parameters)
+        if (parameter.value.position.inRegister)
+          byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
+
+      if (function.scope.maxRequiredStackSpace != function.minStackSize.value)
+        byteCodeState.instructions.Add(new LLI_StackIncrementImm(function.minStackSize, -(long)function.minStackSize.value));
+    }
+  }
+
+  public class CInstruction_SetArray : CInstruction
+  {
+    private readonly CNamedValue value;
+    private readonly byte[] data;
+    private readonly CFunction function;
+
+    public CInstruction_SetArray(CNamedValue value, byte[] data, string file, int line, CFunction function) : base(file, line)
+    {
+      this.data = data;
+      this.value = value;
+      this.function = function;
+
+      if (!value.hasStackOffset)
+        throw new Exception("Internal Compiler Error.");
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      long dataSizeRemaining = data.LongLength;
+      int stackPtrRegister = byteCodeState.GetFreeIntegerRegister(function.minStackSize);
+      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
+      
+      int valueRegister = byteCodeState.GetFreeIntegerRegister(function.minStackSize);
+      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
+
+      long offset = 0;
+
+      byte[] _data = new byte[8];
+
+      while (dataSizeRemaining >= 8)
+      {
+        for (int i = 0; i < 8; i++)
+          _data[i] = data[offset + i];
+
+        byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+        byteCodeState.instructions.Add(new LLI_MovPtrInRegisterFromRegister(stackPtrRegister, valueRegister)); // move register to ptr.
+
+        dataSizeRemaining -= 8;
+        offset += 8;
+
+        if (dataSizeRemaining > 0)
+          byteCodeState.instructions.Add(new LLI_UAddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
+      }
+
+      if (dataSizeRemaining > 0)
+      {
+        for (int i = 0; i < 8 && offset + i < data.LongLength; i++)
+          _data[i] = data[offset + i];
+
+        byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+        byteCodeState.instructions.Add(new LLI_MovPtrInRegisterFromRegister_NBytes(stackPtrRegister, valueRegister, (byte)dataSizeRemaining)); // move register to ptr.
+      }
+
+      byteCodeState.registers[stackPtrRegister] = null;
+      byteCodeState.registers[valueRegister] = null;
+    }
+  }
+
 
   public class Scope
   {
-    public int maxRequiredStackSpace = 0;
+    public long maxRequiredStackSpace = 0;
 
     public readonly Scope parentScope;
     public readonly bool isFunction;
+    public readonly CFunction self;
+    public int stackSpaceAllocationByteCodeIndex;
+    public bool isConditional = false;
 
     private Dictionary<string, StructCType> definedStructs;
     private Dictionary<string, CFunction> definedFunctions;
@@ -850,8 +1507,17 @@ namespace llsc
     /// </summary>
     public Scope()
     {
-      isFunction = false;
       parentScope = null;
+      isFunction = false;
+      self = null;
+    }
+
+    protected Scope(Scope parentScope, CFunction function)
+    {
+      this.parentScope = parentScope;
+      this.isFunction = true;
+      this.self = function;
+      self.scope = this;
     }
 
     public void AddStruct(StructCType type)
@@ -910,12 +1576,25 @@ namespace llsc
 
       return null;
     }
+
+    public IEnumerable<CFunction> GetLocalFunctions()
+    {
+      return this.definedFunctions == null ? (IEnumerable<CFunction>)new CFunction[0] : this.definedFunctions.Values;
+    }
+
+    public Scope GetChildScope(CFunction function)
+    {
+      return new Scope(this, function);
+    }
   }
 
   static class Compiler
   {
     static bool WarningsAsErrors = false;
     static bool ShowWarnings = true;
+
+    public static readonly int IntegerRegisters = 8;
+    public static readonly int FloatRegisters = 8;
 
     public static void Error(string error, string file, int line)
     {
@@ -1256,8 +1935,23 @@ namespace llsc
               file.nodes[i] = new NType(BuiltInCType.Types[((NName)node).name], node.file, node.line);
               break;
 
+            case "void":
+              file.nodes[i] = new NType(VoidCType.Instance, node.file, node.line);
+              break;
+
             case "text":
-              file.nodes[i] = new NType(new PtrCType(BuiltInCType.Types["i8"]), node.file, node.line);
+              if (file.nodes.NextIs(i + 1, typeof(NName), typeof(NOperator)) && (file.nodes[i + 2] as NOperator).operatorType == "=")
+              {
+                var originalNode = file.nodes[i];
+                file.nodes[i] = new NArrayKeyword(originalNode.file, originalNode.line);
+                file.nodes.Insert(i + 1, new NOperator("<", originalNode.file, originalNode.line));
+                file.nodes.Insert(i + 2, new NType(BuiltInCType.Types["i8"], originalNode.file, originalNode.line));
+                file.nodes.Insert(i + 3, new NOperator(">", originalNode.file, originalNode.line));
+              }
+              else
+              {
+                file.nodes[i] = new NType(new PtrCType(BuiltInCType.Types["i8"]), node.file, node.line);
+              }
               break;
 
             case "voidptr":
@@ -1292,13 +1986,23 @@ namespace llsc
           var size = nodes[i + 4] as NIntegerValue;
 
           nodes.RemoveRange(i, 6);
-          nodes.Insert(i, new NType(new ArrayCType(type.type, size.uint_value), start.file, start.line));
+          nodes.Insert(i, new NType(new ArrayCType(type.type, (long)size.uint_value), start.file, start.line));
         }
       }
     }
 
     private static void CompileScope(Scope scope, List<Node> nodes, ref ByteCodeState byteCodeState)
     {
+      if (scope.isFunction)
+      {
+        scope.maxRequiredStackSpace = scope.self.minStackSize.value;
+
+        foreach (var parameter in scope.self.parameters)
+          scope.AddVariable(parameter.value);
+
+        scope.instructions.Add(new CInstruction_BeginFunction(scope.self));
+      }
+
       while (nodes.Count > 0)
       {
         // Struct.
@@ -1372,18 +2076,142 @@ namespace llsc
 
           PatchTypes(scope, ref nodes);
         }
-        // Unsized Array.
-        else if (nodes.NextIs(typeof(NArrayKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NName), typeof(NOperator), typeof(NOpenScope)) && ((nodes[1] as NOperator).operatorType == "<" && (nodes[3] as NOperator).operatorType == ">" && (nodes[5] as NOperator).operatorType == "="))
+        // Function.
+        else if (nodes.NextIs(typeof(NFunctionKeyword), typeof(NType), typeof(NName), typeof(NOpenParanthesis)))
+        {
+          var startNode = nodes[0];
+          var type = (nodes[1] as NType).type;
+          var nameNode = nodes[2] as NName;
+
+          nodes.RemoveRange(0, 4);
+
+          // Function already defined?
+          {
+            CFunction existingFunction = scope.GetFunction(nameNode.name);
+
+            if (null != existingFunction)
+              Error($"Duplicate function definition for identifier '{nameNode.name}'. A function with the same name has already been defined in File '{existingFunction.file}', Line {existingFunction.line}: {existingFunction}", nameNode.file, nameNode.line);
+          }
+
+          var parameters = new List<FunctionParameter>();
+
+          // Get Parameters.
+          while (true)
+          {
+            if (nodes.Count == 0)
+            {
+              Error("Unexpected end of function definition.", startNode.file, startNode.line);
+            }
+            else if (nodes.NextIs(typeof(NType), typeof(NName)))
+            {
+              parameters.Add(new FunctionParameter((nodes[0] as NType).type, (nodes[1] as NName).name, nodes[1].file, nodes[1].line));
+              nodes.RemoveRange(0, 2);
+
+              if (nodes.Count == 0)
+              {
+                Error("Unexpected end of function definition.", startNode.file, startNode.line);
+              }
+              else if (nodes[0] is NComma)
+              {
+                nodes.RemoveAt(0);
+              }
+              else if (nodes[0] is NCloseParanthesis)
+              {
+                nodes.RemoveAt(0);
+                break;
+              }
+              else
+              {
+                Error($"Unexpected {nodes[0]} in function definition.", nodes[0].file, nodes[0].line);
+              }
+            }
+            else if (nodes[0] is NCloseParanthesis)
+            {
+              nodes.RemoveAt(0);
+              break;
+            }
+            else
+            {
+              Error($"Unexpected {nodes[0]} in function definition.", nodes[0].file, nodes[0].line);
+            }
+          }
+
+          // Add Function to scope.
+          var function = new CFunction(nameNode.name, type, parameters, startNode.file, startNode.line);
+          scope.AddFunction(function);
+          
+          if (nodes.Count < 2)
+            Error("Unexpected end of function.", startNode.file, startNode.line);
+          else if (!(nodes[0] is NOpenScope))
+            Error($"Unexpected {nodes[0]}. Expected function definition.", nodes[0].file, nodes[0].line);
+
+          nodes.RemoveAt(0);
+
+          // Find End.
+          int openScopes = 1;
+          int endIndex = 0;
+
+          for (; endIndex < nodes.Count; endIndex++)
+          {
+            if (nodes[endIndex] is NOpenScope)
+            {
+              openScopes++;
+            }
+            else if (nodes[endIndex] is NCloseScope)
+            {
+              openScopes--;
+
+              if (openScopes == 0)
+                break;
+            }
+          }
+
+          if (openScopes != 0)
+            Error($"Missing end of function at File '{startNode.file}', Line {startNode.line}. Expected '}}'.", nodes.Last().file, nodes.Last().line);
+
+          // Extract Nodes.
+          var functionNodes = nodes.GetRange(0, endIndex);
+          nodes.RemoveRange(0, endIndex + 1);
+
+          function.nodes = functionNodes;
+        }
+        // Dynamic Array.
+        else if (nodes.NextIs(typeof(NArrayKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NName), typeof(NOperator)) && ((nodes[1] as NOperator).operatorType == "<" && (nodes[3] as NOperator).operatorType == ">" && (nodes[5] as NOperator).operatorType == "="))
         {
           if (!((nodes[2] as NType).type is BuiltInCType))
             Error($"Invalid Type '{(nodes[2] as NType).type.ToString()}'. Dynamically Sized Arrays can only contain builtin types.", nodes[2].file, nodes[2].line);
 
-          // TODO: Implement.
+          var builtinType = (nodes[2] as NType).type as BuiltInCType;
+
+          if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
+          {
+            var stringValue = nodes[6] as NStringValue;
+            var arrayType = new ArrayCType(builtinType, stringValue.length);
+            var value = new CNamedValue(nodes[4] as NName, builtinType, false, true);
+            value.homeStackOffset = scope.maxRequiredStackSpace;
+            value.hasStackOffset = true;
+            scope.maxRequiredStackSpace += arrayType.GetSize();
+
+            scope.AddVariable(value);
+            scope.instructions.Add(new CInstruction_SetArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.self));
+            nodes.RemoveRange(0, 8);
+          }
+          else if (nodes.Count > 6 && nodes[6] is NOpenScope)
+          {
+            // TODO: Implement.
+          }
         }
         else
         {
           Error($"Unexpected {nodes[0]}.", nodes[0].file, nodes[1].line);
         }
+      }
+
+      foreach (CFunction function in scope.GetLocalFunctions())
+      {
+        Scope childScope = scope.GetChildScope(function);
+
+        CompileScope(childScope, function.nodes, ref byteCodeState);
       }
     }
   }

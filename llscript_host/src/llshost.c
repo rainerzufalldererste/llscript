@@ -103,6 +103,24 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_MOV_REGISTER_STACK_N_BYTES:
+    {
+      const uint8_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
+      pCodePtr += 8;
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+      const uint8_t bytes = *pCodePtr;
+      pCodePtr++;
+
+      if (source_register < 8)
+        memcpy(pStackPtr, &iregister[source_register], bytes);
+      else IF_LAST_OPT(source_register < 16)
+        memcpy(pStackPtr, &fregister[source_register - 8], bytes);
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_MOV_STACK_REGISTER:
     {
       const lls_code_t target_register = *pCodePtr;
@@ -150,6 +168,32 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         *(uint64_t *)pTarget = iregister[source_register];
       else IF_LAST_OPT(source_register < 16)
         *(double *)pTarget = fregister[source_register - 8];
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES:
+    {
+      const lls_code_t target_ptr_register = *pCodePtr;
+      pCodePtr++;
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      const uint8_t bytes = *pCodePtr;
+      pCodePtr++;
+
+      void *pTarget;
+
+      IF_LAST_OPT(target_ptr_register < 8)
+        pTarget = (void *)iregister[target_ptr_register];
+      ASSERT_NO_ELSE;
+
+      if (source_register < 8)
+        memcpy(pTarget, &iregister[source_register], bytes);
+      else IF_LAST_OPT(source_register < 16)
+        memcpy(pTarget, &fregister[source_register - 8], bytes);
       ASSERT_NO_ELSE;
 
       break;
