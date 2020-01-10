@@ -3,7 +3,7 @@
 
 enum
 {
-  LLS_BF_ALLOC,
+  LLS_BF_ALLOC = 0,
   LLS_BF_FREE,
   LLS_BF_REALLOC,
   LLS_BF_LOAD_LIBRARY,

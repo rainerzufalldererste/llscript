@@ -345,6 +345,33 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_MOV_STACK_STACK_N_BYTES:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOV_STACK_STACK_N_BYTES);
+
+      uint8_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
+      pCodePtr += 8;
+
+      LOG_DELIMITER();
+
+      const uint8_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
+      LOG_I64(*(int64_t *)pCodePtr);
+      pCodePtr += 8;
+
+      LOG_DELIMITER();
+
+      const uint8_t bytes = *pCodePtr;
+      pCodePtr++;
+      LOG_U8(bytes);
+
+      LOG_END();
+
+      CopyBytes(pTargetStackPtr, pSourceStackPtr, bytes);
+
+      break;
+    }
+
     case LLS_OP_MOV_REGISTER__PTR_IN_REGISTER:
     {
       LOG_INSTRUCTION_NAME(LLS_OP_MOV_REGISTER__PTR_IN_REGISTER);
@@ -681,7 +708,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         {
           LPVOID (*HeapAlloc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = pState->pHeapAlloc;
 
-          iregister[target_register] = (uint64_t)HeapAlloc(pState->pHeapHandle, 0, iregister[0]);
+          iregister[target_register] = (uint64_t)HeapAlloc(pState->pHeapHandle, 0, iregister[1]);
         }
         ASSERT_NO_ELSE;
         break;
@@ -690,7 +717,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       {
         BOOL (*HeapFree)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem) = pState->pHeapFree;
 
-        HeapFree(pState->pHeapHandle, 0, iregister[0]);
+        HeapFree(pState->pHeapHandle, 0, iregister[1]);
 
         break;
       }
@@ -700,7 +727,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         {
           LPVOID (*HeapReAlloc)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem, SIZE_T dwBytes) = pState->pHeapRealloc;
 
-          iregister[target_register] = HeapReAlloc(pState->pHeapHandle, 0, iregister[0], iregister[1]);
+          iregister[target_register] = HeapReAlloc(pState->pHeapHandle, 0, iregister[1], iregister[2]);
         }
         ASSERT_NO_ELSE;
         break;
@@ -710,7 +737,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         {
           HMODULE (*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
 
-          iregister[target_register] = LoadLibraryA(iregister[0]);
+          iregister[target_register] = LoadLibraryA(iregister[1]);
         }
         ASSERT_NO_ELSE;
         break;
@@ -720,7 +747,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         {
           FARPROC (*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
 
-          iregister[target_register] = GetProcAddress(iregister[0], iregister[1]);
+          iregister[target_register] = GetProcAddress(iregister[1], iregister[2]);
         }
         ASSERT_NO_ELSE;
         break;
