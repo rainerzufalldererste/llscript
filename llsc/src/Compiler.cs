@@ -446,6 +446,10 @@ namespace llsc
     {
       return !a.Equals(b);
     }
+
+    public virtual bool CanImplicitCastTo(CType type) => false;
+    
+    public virtual bool CanExplicitCastTo(CType type) => false;
   }
 
   public class VoidCType : CType
@@ -574,6 +578,10 @@ namespace llsc
         }
       }
     }
+
+    public override bool CanImplicitCastTo(CType type) => type is BuiltInCType && !(IsFloat() ^ (type as BuiltInCType).IsFloat()) && GetSize() <= type.GetSize();
+
+    public override bool CanExplicitCastTo(CType type) => type is BuiltInCType || (!IsFloat() && GetSize() == type.GetSize() && (type is PtrCType || type is ExternFuncCType || type is ExternFuncCType || type is FuncCType));
   }
 
   public class PtrCType : CType
@@ -591,6 +599,10 @@ namespace llsc
     public override int GetHashCode() => -(pointsTo.GetHashCode() + 1);
 
     public override string ToString() => "ptr<" + pointsTo.ToString() + ">";
+
+    public override bool CanImplicitCastTo(CType type) => type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo);
+
+    public override bool CanExplicitCastTo(CType type) => type is PtrCType || (type is BuiltInCType && !(type as BuiltInCType).IsFloat() && type.GetSize() == GetSize());
   }
 
   public class ArrayCType : CType
@@ -611,6 +623,10 @@ namespace llsc
     public override int GetHashCode() => -(type.GetHashCode() ^ count.GetHashCode());
 
     public override string ToString() => "array<" + type.ToString() + ", " + count + ">";
+
+    public override bool CanImplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type);
+
+    public override bool CanExplicitCastTo(CType type) => this.Equals(type) || type is PtrCType;
   }
 
   public class ExternFuncCType : CType
@@ -670,6 +686,73 @@ namespace llsc
 
       return ret;
     }
+
+    public override bool CanImplicitCastTo(CType type) => this.Equals(type);
+
+    public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
+  }
+
+  public class FuncCType : CType
+  {
+    public readonly CType[] parameterTypes;
+    public readonly CType returnType;
+
+    public FuncCType(CType returns, IEnumerable<CType> parameters)
+    {
+      returnType = returns;
+      parameterTypes = parameters.ToArray();
+    }
+
+    public override long GetSize() => 8;
+
+    public override bool Equals(object obj)
+    {
+      if (obj is FuncCType)
+      {
+        FuncCType other = (obj as FuncCType);
+
+        if (other.returnType != returnType || other.parameterTypes.Length != parameterTypes.Length)
+          return false;
+
+        for (int i = 0; i < parameterTypes.Length; i++)
+          if (!other.parameterTypes[i].Equals(parameterTypes[i]))
+            return false;
+
+        return true;
+      }
+
+      return false;
+    }
+
+    public override int GetHashCode()
+    {
+      int hashCode = ~(-returnType.GetHashCode());
+      int parameterIndex = 1;
+
+      foreach (var type in parameterTypes)
+        hashCode ^= (type.GetHashCode() + parameterIndex++);
+
+      return hashCode;
+    }
+
+    public override string ToString()
+    {
+      string ret = "func<" + returnType.ToString() + " (";
+
+      for (int i = 0; i < parameterTypes.Length; i++)
+      {
+        ret += parameterTypes[i].ToString();
+
+        if (i + 1 < parameterTypes.Length)
+          ret += ", ";
+      }
+
+      return ret;
+    }
+
+    public override bool CanImplicitCastTo(CType type) => this.Equals(type);
+
+    public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
   }
 
   public class StructCType : CType
@@ -1049,7 +1132,7 @@ namespace llsc
     public readonly CType returnType;
     public FunctionParameter[] parameters;
 
-    public readonly Value<long> minStackSize = new Value<long>(0);
+    public readonly SharedValue<long> minStackSize = new SharedValue<long>(0);
     public readonly long callStackSize;
     public List<Node> nodes;
     public Scope scope;
@@ -1064,17 +1147,17 @@ namespace llsc
       this.file = file;
       this.line = line;
 
-      minStackSize.value = 8; // Return Address.
+      minStackSize.Value = 8; // Return Address.
       
       // + Return Value Ptr if not void or in register.
       if (!(returnType is VoidCType || returnType is BuiltInCType || returnType is PtrCType))
-        minStackSize.value += 8;
+        minStackSize.Value += 8;
 
       int intRegistersTaken = (this is CBuiltInFunction ? 1 : 0);
       int floatRegistersTaken = 0;
 
       if (this is CBuiltInFunction)
-        minStackSize.value = 0;
+        minStackSize.Value = 0;
 
       foreach (var param in this.parameters)
       {
@@ -1117,12 +1200,12 @@ namespace llsc
 
         // Whatever doesn't call 'continue' will be dealt with here:
         // Value on stack.
-        param.value.position = Position.StackOffset(minStackSize.value);
+        param.value.position = Position.StackOffset(minStackSize.Value);
         param.value.hasPosition = true;
-        minStackSize.value += param.type.GetSize();
+        minStackSize.Value += param.type.GetSize();
       }
 
-      callStackSize = minStackSize.value;
+      callStackSize = minStackSize.Value;
     }
 
     public void ResetRegisterPositions()
@@ -1230,7 +1313,7 @@ namespace llsc
 
     public CValue[] registers = new CValue[Compiler.IntegerRegisters + Compiler.FloatRegisters];
 
-    public int GetFreeIntegerRegister(Value<long> stackSize)
+    public int GetFreeIntegerRegister(SharedValue<long> stackSize)
     {
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
         if (registers[i] == null)
@@ -1265,6 +1348,55 @@ namespace llsc
         oldestIndex = 0;
 
         for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
+        {
+          if (registers[i].lastTouchedInstructionCount < oldestValue)
+          {
+            oldestValue = registers[i].lastTouchedInstructionCount;
+            oldestIndex = i;
+          }
+        }
+      }
+
+      FreeUsedRegister(oldestIndex, stackSize);
+
+      return oldestIndex;
+    }
+
+    public int GetFreeFloatRegister(SharedValue<long> stackSize)
+    {
+      for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
+        if (registers[i] == null)
+          return i;
+
+      for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
+        if (registers[i].remainingReferences == 0)
+          return i;
+
+      int oldestIndex = -1;
+      int oldestValue = 0;
+
+      // With Home.
+
+      for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
+      {
+        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        {
+          if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
+            return i;
+
+          if (registers[i].lastTouchedInstructionCount < oldestValue)
+          {
+            oldestValue = registers[i].lastTouchedInstructionCount;
+            oldestIndex = i;
+          }
+        }
+      }
+
+      if (oldestIndex < 0)
+      {
+        oldestIndex = 0;
+
+        for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
         {
           if (registers[i].lastTouchedInstructionCount < oldestValue)
           {
@@ -1315,7 +1447,7 @@ namespace llsc
       return -1;
     }
 
-    public void FreeRegister(int register, Value<long> stackSize)
+    public void FreeRegister(int register, SharedValue<long> stackSize)
     {
       if (registers[register] == null || registers[register].remainingReferences == 0)
         return;
@@ -1338,7 +1470,7 @@ namespace llsc
       }
     }
 
-    private void FreeUsedRegister(int register, Value<long> stackSize)
+    private void FreeUsedRegister(int register, SharedValue<long> stackSize)
     {
       var size = registers[register].type.GetSize();
 
@@ -1360,31 +1492,31 @@ namespace llsc
         else
         {
           if (size == 8)
-            instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.value));
+            instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.Value));
           else
-            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.value, (byte)size));
+            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.Value, (byte)size));
 
           namedValue.hasStackOffset = true;
-          namedValue.homeStackOffset = stackSize.value;
+          namedValue.homeStackOffset = stackSize.Value;
 
           namedValue.position.inRegister = false;
           namedValue.position.stackOffsetForward = namedValue.homeStackOffset;
           namedValue.modifiedSinceLastHome = false;
 
-          stackSize.value += size;
+          stackSize.Value += size;
         }
       }
       else
       {
         if (size == 8)
-          instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.value));
+          instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.Value));
         else
-          instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.value, (byte)size));
+          instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.Value, (byte)size));
 
         registers[register].position.inRegister = false;
-        registers[register].position.stackOffsetForward = stackSize.value;
+        registers[register].position.stackOffsetForward = stackSize.Value;
 
-        stackSize.value += size;
+        stackSize.Value += size;
       }
     }
 
@@ -1413,7 +1545,7 @@ namespace llsc
       }
     }
 
-    public void MoveValueToPosition(CValue sourceValue, Position targetPosition, Value<long> stackSize, bool addReference)
+    public void MoveValueToPosition(CValue sourceValue, Position targetPosition, SharedValue<long> stackSize, bool addReference)
     {
       // TODO: Work out the reference count...
 
@@ -1422,7 +1554,7 @@ namespace llsc
 
       if (sourceValue is CConstValue)
       {
-        if (!(sourceValue.hasPosition && targetPosition.inRegister && sourceValue.position.inRegister && sourceValue.position.registerIndex == targetPosition.registerIndex) || (targetPosition.inRegister && registers[targetPosition.registerIndex] is CConstValue && (registers[targetPosition.registerIndex] as CConstValue).uvalue == (sourceValue as CConstValue).uvalue))
+        if ((sourceValue.hasPosition && targetPosition.inRegister && sourceValue.position.inRegister && sourceValue.position.registerIndex == targetPosition.registerIndex) || (targetPosition.inRegister && registers[targetPosition.registerIndex] != null && registers[targetPosition.registerIndex] is CConstValue && (registers[targetPosition.registerIndex] as CConstValue).uvalue == (sourceValue as CConstValue).uvalue))
         {
           if (addReference)
             registers[targetPosition.registerIndex].remainingReferences++;
@@ -1488,7 +1620,7 @@ namespace llsc
       }
       else
       {
-        if (sourceValue.hasPosition)
+        if (!sourceValue.hasPosition)
           throw new Exception("Internal Compiler Error: Move To Position, but source value has no origin and is not constant.");
 
         if (sourceValue.position.inRegister == targetPosition.inRegister && ((targetPosition.inRegister && sourceValue.position.registerIndex == targetPosition.registerIndex) || (!targetPosition.inRegister && sourceValue.position.stackOffsetForward == targetPosition.stackOffsetForward)))
@@ -1580,13 +1712,86 @@ namespace llsc
         }
       }
     }
+
+    public void MoveValueToPositionWithCast(CValue sourceValue, Position targetPosition, CType targetType, SharedValue<long> stackSize, bool addReference)
+    {
+      // TODO: What type will be stored? The converted one? The original one? Should we return the value?!
+
+      if (!sourceValue.type.Equals(targetType) && !sourceValue.type.CanImplicitCastTo(targetType) && !sourceValue.type.CanExplicitCastTo(targetType))
+        throw new Exception($"Internal Compiler Error: Trying to Move Value with Cast from type '{sourceValue.type}' to type '{targetType}' but there is no cast available.");
+
+      if (sourceValue.type.Equals(targetType))
+      {
+        MoveValueToPosition(sourceValue, targetPosition, stackSize, addReference);
+        return;
+      }
+
+      if (sourceValue.type is ArrayCType && targetType is PtrCType)
+      {
+        if (targetPosition.inRegister)
+        {
+          if (!sourceValue.hasPosition)
+            throw new Exception($"Internal Compiler Error: sourceValue {sourceValue} doesn't have a position.");
+
+          FreeRegister(targetPosition.registerIndex, stackSize);
+          instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, targetPosition.registerIndex));
+
+          sourceValue.lastTouchedInstructionCount = instructions.Count;
+          registers[targetPosition.registerIndex] = sourceValue;
+
+          if (addReference)
+            sourceValue.remainingReferences++;
+        }
+        else
+        {
+          int triviallyFreeRegister = GetTriviallyFreeIntegerRegister();
+
+          if (triviallyFreeRegister == -1)
+          {
+            instructions.Add(new LLI_PushRegister(0));
+            instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward + 8, 0));
+            instructions.Add(new LLI_PopRegister(0));
+          }
+          else
+          {
+            instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, triviallyFreeRegister));
+            instructions.Add(new LLI_MovRegisterToStackOffset(triviallyFreeRegister, stackSize, sourceValue.position.stackOffsetForward));
+
+            registers[triviallyFreeRegister] = sourceValue;
+          }
+
+          if (addReference)
+            sourceValue.remainingReferences++;
+        }
+      }
+      else if (sourceValue.type is FuncCType)
+      {
+        throw new NotImplementedException();
+      }
+      else if (sourceValue.type is BuiltInCType && targetType is BuiltInCType)
+      {
+        if ((sourceValue.type as BuiltInCType).IsFloat() ^ (targetType as BuiltInCType).IsFloat())
+        {
+          MoveValueToPosition(sourceValue, targetPosition, stackSize, addReference);
+          throw new NotImplementedException();
+        }
+        else
+        {
+          throw new NotImplementedException();
+        }
+      }
+      else
+      {
+        MoveValueToPosition(sourceValue, targetPosition, stackSize, addReference);
+      }
+    }
   }
   
-  public class Value<T>
+  public class SharedValue<T> where T : IComparable<T>
   {
-    public T value;
+    public T Value;
 
-    public Value(T value) => this.value = value;
+    public SharedValue(T value) => this.Value = value;
   }
 
   public abstract class LLInstruction
@@ -1638,15 +1843,15 @@ namespace llsc
 
   public class LLI_StackIncrementImm : LLInstruction
   {
-    readonly Value<long> value;
+    readonly SharedValue<long> value;
     long offset = 0;
 
     public LLI_StackIncrementImm(long value) : base(9)
     {
-      this.value = new Value<long>(value);
+      this.value = new SharedValue<long>(value);
     }
 
-    public LLI_StackIncrementImm(Value<long> value, long offset = 0) : base(9)
+    public LLI_StackIncrementImm(SharedValue<long> value, long offset = 0) : base(9)
     {
       this.value = value;
       this.offset = offset;
@@ -1654,28 +1859,28 @@ namespace llsc
 
     public override void AfterCodeGen()
     {
-      if (((long)this.value.value + offset) == 0)
+      if (((long)this.value.Value + offset) == 0)
         base.bytecodeSize = 0;
     }
 
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_STACK_INC_IMM);
-      byteCode.AddRange(BitConverter.GetBytes(value.value - offset));
+      byteCode.AddRange(BitConverter.GetBytes(value.Value - offset));
     }
   }
 
   public class LLI_StackDecrementImm : LLInstruction
   {
-    readonly Value<long> value;
+    readonly SharedValue<long> value;
     long offset = 0;
 
     public LLI_StackDecrementImm(long value) : base(9)
     {
-      this.value = new Value<long>(value);
+      this.value = new SharedValue<long>(value);
     }
 
-    public LLI_StackDecrementImm(Value<long> value, long offset = 0) : base(9)
+    public LLI_StackDecrementImm(SharedValue<long> value, long offset = 0) : base(9)
     {
       this.value = value;
       this.offset = offset;
@@ -1683,38 +1888,38 @@ namespace llsc
 
     public override void AfterCodeGen()
     {
-      if (((long)this.value.value + offset) == 0)
+      if (((long)this.value.Value + offset) == 0)
         base.bytecodeSize = 0;
     }
 
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_STACK_DEC_IMM);
-      byteCode.AddRange(BitConverter.GetBytes(value.value - offset));
+      byteCode.AddRange(BitConverter.GetBytes(value.Value - offset));
     }
   }
 
   public class LLI_LoadEffectiveAddress_StackOffsetToRegister : LLInstruction
   {
-    readonly Value<long> value;
-    readonly Value<long> offset;
+    readonly SharedValue<long> value;
+    readonly SharedValue<long> offset;
     readonly int register;
 
     public LLI_LoadEffectiveAddress_StackOffsetToRegister(long value, long offset, int register) : base(10)
     {
-      this.value = new Value<long>(value);
-      this.offset = new Value<long>(offset);
+      this.value = new SharedValue<long>(value);
+      this.offset = new SharedValue<long>(offset);
       this.register = register;
     }
 
-    public LLI_LoadEffectiveAddress_StackOffsetToRegister(Value<long> value, long offset, int register) : base(10)
+    public LLI_LoadEffectiveAddress_StackOffsetToRegister(SharedValue<long> value, long offset, int register) : base(10)
     {
       this.value = value;
-      this.offset = new Value<long>(offset);
+      this.offset = new SharedValue<long>(offset);
       this.register = register;
     }
 
-    public LLI_LoadEffectiveAddress_StackOffsetToRegister(Value<long> value, Value<long> offset, int register) : base(10)
+    public LLI_LoadEffectiveAddress_StackOffsetToRegister(SharedValue<long> value, SharedValue<long> offset, int register) : base(10)
     {
       this.value = value;
       this.offset = offset;
@@ -1725,7 +1930,7 @@ namespace llsc
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_LEA_STACK_TO_REGISTER);
       byteCode.Add((byte)register);
-      byteCode.AddRange(BitConverter.GetBytes(value.value - offset.value));
+      byteCode.AddRange(BitConverter.GetBytes(value.Value - offset.Value));
     }
   }
 
@@ -1753,13 +1958,45 @@ namespace llsc
     }
   }
 
+  public class LLI_PushRegister : LLInstruction
+  {
+    readonly byte register;
+
+    public LLI_PushRegister(byte register) : base(2)
+    {
+      this.register = register;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_PUSH_REGISTER);
+      byteCode.Add(register);
+    }
+  }
+
+  public class LLI_PopRegister : LLInstruction
+  {
+    readonly byte register;
+
+    public LLI_PopRegister(byte register) : base(2)
+    {
+      this.register = register;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_POP_REGISTER);
+      byteCode.Add(register);
+    }
+  }
+
   public class LLI_MovRegisterToStackOffset : LLInstruction
   {
     readonly int register;
-    readonly Value<long> stackSize;
+    readonly SharedValue<long> stackSize;
     readonly long offset;
 
-    public LLI_MovRegisterToStackOffset(int register, Value<long> stackSize, long offset) : base(1 + 8 + 1)
+    public LLI_MovRegisterToStackOffset(int register, SharedValue<long> stackSize, long offset) : base(1 + 8 + 1)
     {
       this.register = register;
       this.stackSize = stackSize;
@@ -1769,7 +2006,7 @@ namespace llsc
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK);
-      byteCode.AddRange(BitConverter.GetBytes(stackSize.value - offset));
+      byteCode.AddRange(BitConverter.GetBytes(stackSize.Value - offset));
       byteCode.Add((byte)register);
     }
   }
@@ -1777,11 +2014,11 @@ namespace llsc
   public class LLI_MovRegisterToStackOffset_NBytes : LLInstruction
   {
     readonly int register;
-    readonly Value<long> stackSize;
+    readonly SharedValue<long> stackSize;
     readonly long offset;
     readonly int bytes;
 
-    public LLI_MovRegisterToStackOffset_NBytes(int register, Value<long> stackSize, long offset, int bytes) : base(1 + 8 + 1 + 1)
+    public LLI_MovRegisterToStackOffset_NBytes(int register, SharedValue<long> stackSize, long offset, int bytes) : base(1 + 8 + 1 + 1)
     {
       this.register = register;
       this.stackSize = stackSize;
@@ -1792,7 +2029,7 @@ namespace llsc
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK_N_BYTES);
-      byteCode.AddRange(BitConverter.GetBytes(stackSize.value - offset));
+      byteCode.AddRange(BitConverter.GetBytes(stackSize.Value - offset));
       byteCode.Add((byte)register);
       byteCode.Add((byte)bytes);
     }
@@ -1801,10 +2038,10 @@ namespace llsc
   public class LLI_MovStackOffsetToRegister : LLInstruction
   {
     readonly int register;
-    readonly Value<long> stackSize;
+    readonly SharedValue<long> stackSize;
     readonly long offset;
 
-    public LLI_MovStackOffsetToRegister(Value<long> stackSize, long offset, int register) : base(1 + 8 + 1)
+    public LLI_MovStackOffsetToRegister(SharedValue<long> stackSize, long offset, int register) : base(1 + 8 + 1)
     {
       this.register = register;
       this.stackSize = stackSize;
@@ -1815,19 +2052,19 @@ namespace llsc
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_STACK_REGISTER);
       byteCode.Add((byte)register);
-      byteCode.AddRange(BitConverter.GetBytes(stackSize.value - offset));
+      byteCode.AddRange(BitConverter.GetBytes(stackSize.Value - offset));
     }
   }
 
   public class LLI_MovStackOffsetToStackOffset : LLInstruction
   {
-    Value<long> sourceStackSize;
+    SharedValue<long> sourceStackSize;
     long sourceOffset;
 
-    Value<long> targetStackSize;
+    SharedValue<long> targetStackSize;
     long targetOffset;
 
-    public LLI_MovStackOffsetToStackOffset(Value<long> sourceStackSize, long sourceOffset, Value<long> targetStackSize, long targetOffset) : base(1 + 8 + 8)
+    public LLI_MovStackOffsetToStackOffset(SharedValue<long> sourceStackSize, long sourceOffset, SharedValue<long> targetStackSize, long targetOffset) : base(1 + 8 + 8)
     {
       this.sourceStackSize = sourceStackSize;
       this.sourceOffset = sourceOffset;
@@ -1839,22 +2076,22 @@ namespace llsc
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_STACK_STACK);
-      byteCode.AddRange(BitConverter.GetBytes(targetStackSize.value - targetOffset));
-      byteCode.AddRange(BitConverter.GetBytes(sourceStackSize.value - sourceOffset));
+      byteCode.AddRange(BitConverter.GetBytes(targetStackSize.Value - targetOffset));
+      byteCode.AddRange(BitConverter.GetBytes(sourceStackSize.Value - sourceOffset));
     }
   }
 
   public class LLI_MovStackOffsetToStackOffset_NBytes : LLInstruction
   {
-    Value<long> sourceStackSize;
+    SharedValue<long> sourceStackSize;
     long sourceOffset;
 
-    Value<long> targetStackSize;
+    SharedValue<long> targetStackSize;
     long targetOffset;
 
     byte bytes;
 
-    public LLI_MovStackOffsetToStackOffset_NBytes(Value<long> sourceStackSize, long sourceOffset, Value<long> targetStackSize, long targetOffset, byte bytes) : base(1 + 8 + 8 + 1)
+    public LLI_MovStackOffsetToStackOffset_NBytes(SharedValue<long> sourceStackSize, long sourceOffset, SharedValue<long> targetStackSize, long targetOffset, byte bytes) : base(1 + 8 + 8 + 1)
     {
       this.sourceStackSize = sourceStackSize;
       this.sourceOffset = sourceOffset;
@@ -1868,8 +2105,8 @@ namespace llsc
     public override void AppendBytecode(ref List<byte> byteCode)
     {
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_STACK_STACK_N_BYTES);
-      byteCode.AddRange(BitConverter.GetBytes(targetStackSize.value - targetOffset));
-      byteCode.AddRange(BitConverter.GetBytes(sourceStackSize.value - sourceOffset));
+      byteCode.AddRange(BitConverter.GetBytes(targetStackSize.Value - targetOffset));
+      byteCode.AddRange(BitConverter.GetBytes(sourceStackSize.Value - sourceOffset));
       byteCode.Add(bytes);
     }
   }
@@ -2065,9 +2302,9 @@ namespace llsc
 
   public class CInstruction_BeginGlobalScope : CInstruction
   {
-    private readonly Value<long> stackSize;
+    private readonly SharedValue<long> stackSize;
 
-    public CInstruction_BeginGlobalScope(Value<long> stackSize, string file, int line) : base(file, line)
+    public CInstruction_BeginGlobalScope(SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.stackSize = stackSize;
     }
@@ -2107,9 +2344,9 @@ namespace llsc
 
   public class CInstruction_EndGlobalScope : CInstruction
   {
-    private readonly Value<long> stackSize;
+    private readonly SharedValue<long> stackSize;
 
-    public CInstruction_EndGlobalScope(Value<long> stackSize, string file, int line) : base(file, line)
+    public CInstruction_EndGlobalScope(SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.stackSize = stackSize;
     }
@@ -2126,18 +2363,36 @@ namespace llsc
 
   public class CInstruction_SetArray : CInstruction
   {
-    private readonly CNamedValue value;
+    private readonly CValue value;
     private readonly byte[] data;
-    private readonly Value<long> stackSize;
+    private readonly SharedValue<long> stackSize;
 
-    public CInstruction_SetArray(CNamedValue value, byte[] data, string file, int line, Value<long> stackSize) : base(file, line)
+    public CInstruction_SetArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize) : base(file, line)
     {
       this.data = data;
       this.value = value;
       this.stackSize = stackSize;
 
-      if (!value.hasStackOffset)
+      if (value.hasPosition && value.position.inRegister)
         throw new Exception("Internal Compiler Error.");
+
+      if (!value.hasPosition)
+      {
+        value.hasPosition = true;
+        value.position.inRegister = false;
+        value.position.stackOffsetForward = stackSize.Value;
+
+        if (value is CNamedValue)
+        {
+          var t = value as CNamedValue;
+
+          t.hasStackOffset = true;
+          t.homeStackOffset = value.position.stackOffsetForward;
+          t.modifiedSinceLastHome = false;
+        }
+
+        stackSize.Value += value.type.GetSize();
+      }
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2146,7 +2401,7 @@ namespace llsc
       int stackPtrRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
       byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
 
-      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.homeStackOffset, stackPtrRegister));
+      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, stackPtrRegister));
       
       int valueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
       byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
@@ -2184,14 +2439,78 @@ namespace llsc
     }
   }
 
+  public class CInstruction_SetValueTo : CInstruction
+  {
+    private readonly CValue targetValue, sourceValue;
+    private readonly SharedValue<long> stackSize;
+
+    public CInstruction_SetValueTo(CValue targetValue, CValue sourceValue, string file, int line, SharedValue<long> stackSize) : base(file, line)
+    {
+      this.targetValue = targetValue;
+      this.sourceValue = sourceValue;
+      this.stackSize = stackSize;
+
+      if (!sourceValue.type.CanImplicitCastTo(targetValue.type))
+        Compiler.Error($"Type Mismatch: '{targetValue}' cannot be assigned to '{sourceValue}', because there is no implicit conversion available.", file, line);
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (sourceValue == targetValue)
+        return;
+
+      if (!sourceValue.hasPosition)
+        throw new Exception("Internal Compiler Error: Source Value has no position.");
+
+      if (!targetValue.hasPosition)
+      {
+        targetValue.hasPosition = true;
+
+        if (!(targetValue.type is ArrayCType) && targetValue.type.GetSize() <= 8)
+        {
+          // Move to register.
+          targetValue.position.inRegister = true;
+          targetValue.position.registerIndex = targetValue.type is BuiltInCType && (targetValue.type as BuiltInCType).IsFloat() ? byteCodeState.GetFreeFloatRegister(stackSize) : byteCodeState.GetFreeIntegerRegister(stackSize);
+        }
+        else
+        {
+          // Place on stack.
+          targetValue.position.inRegister = false;
+          targetValue.position.stackOffsetForward = stackSize.Value;
+
+          if (targetValue is CNamedValue)
+          {
+            var t = targetValue as CNamedValue;
+
+            t.hasStackOffset = true;
+            t.homeStackOffset = targetValue.position.stackOffsetForward;
+            t.modifiedSinceLastHome = false;
+          }
+
+          stackSize.Value += targetValue.type.GetSize();
+        }
+      }
+
+      byteCodeState.MoveValueToPosition(sourceValue, targetValue.position, stackSize, false);
+
+      if (targetValue.position.inRegister && targetValue is CNamedValue)
+      {
+        var t = targetValue as CNamedValue;
+
+        if (t.hasStackOffset)
+          t.modifiedSinceLastHome = true;
+      }
+    }
+  }
+
   public class CInstruction_CallFunction : CInstruction
   {
     private readonly CFunction function;
     private readonly List<CValue> arguments;
     private readonly CValue returnValue;
-    private readonly Value<long> stackSize;
+    private readonly SharedValue<long> stackSize;
 
-    public CInstruction_CallFunction(CFunction function, List<CValue> arguments, out CValue returnValue, Value<long> stackSize, string file, int line) : base(file, line)
+    public CInstruction_CallFunction(CFunction function, List<CValue> arguments, out CValue returnValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.function = function;
       this.arguments = arguments;
@@ -2205,8 +2524,8 @@ namespace llsc
         if (!arguments[i].isInitialized)
           Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter {function.parameters[i].type} {function.parameters[i].name} has not been initialized yet. Defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
 
-        if (arguments[i].type != function.parameters[i].type)
-          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter {function.parameters[i].type} {function.parameters[i].name} is of mismatching type '{arguments[i].type}'. Defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+        if (!arguments[i].type.CanImplicitCastTo(function.parameters[i].type))
+          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter {function.parameters[i].type} {function.parameters[i].name} is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
@@ -2230,7 +2549,7 @@ namespace llsc
         var targetPosition = function.parameters[i].value.position;
         var sourceValue = arguments[i];
 
-        byteCodeState.MoveValueToPosition(sourceValue, targetPosition, stackSize, true);
+        byteCodeState.MoveValueToPositionWithCast(sourceValue, targetPosition, function.parameters[i].type, stackSize, true);
       }
 
       if (function is CBuiltInFunction)
@@ -2262,7 +2581,7 @@ namespace llsc
 
   public class Scope
   {
-    public Value<long> maxRequiredStackSpace = new Value<long>(0);
+    public SharedValue<long> maxRequiredStackSpace = new SharedValue<long>(0);
 
     public readonly Scope parentScope;
     public readonly bool isFunction;
@@ -2460,13 +2779,18 @@ namespace llsc
         if (!anyFilesCompiled)
           Error("No Files have been compiled.", null, 0);
 
+        Console.WriteLine($"Parsing Succeeded. ({allNodes.Count} Nodes parsed from {files.Count()} Files)");
+
         files = null;
 
         var globalScope = new Scope();
         var byteCodeState = new ByteCodeState();
 
         CompileScope(globalScope, allNodes, ref byteCodeState);
+        Console.WriteLine($"Instruction Generation Succeeded. ({byteCodeState.instructions.Count} Instructions & Pseudo-Instructions generated.)");
+
         byteCodeState.CompileInstructionsToBytecode();
+        Console.WriteLine($"Code Generation Succeeded. ({byteCodeState.byteCode.Count} Bytes)");
 
         File.WriteAllBytes(outFileName, byteCodeState.byteCode.ToArray());
       }
@@ -2481,12 +2805,14 @@ namespace llsc
       }
       catch (Exception e)
       {
-        Console.WriteLine("Internal Compiler Error.\n\n" + e.ToString());
+        Console.WriteLine("Internal Compiler Error.");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("\n" + e.ToString());
 
         Environment.Exit(-1);
       }
 
-      Console.WriteLine("Compilation Succeeded.");
+      Console.WriteLine("\nCompilation Succeeded.");
     }
 
     private static void Parse(FileContents file)
@@ -2650,7 +2976,9 @@ namespace llsc
           }
           catch (Exception e)
           {
-            Console.WriteLine($"Internal Compiler Error Parsing File '{file.filename}', Line {line + 1}.\n\n" + e.ToString());
+            Console.WriteLine($"Internal Compiler Error Parsing File '{file.filename}', Line {line + 1}.");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("\n" + e.ToString());
 
             Environment.Exit(-1);
           }
@@ -2665,7 +2993,9 @@ namespace llsc
       }
       catch (Exception e)
       {
-        Console.WriteLine($"Internal Compiler Error Parsing File '{file.filename}'.\n\n" + e.ToString());
+        Console.WriteLine($"Internal Compiler Error Parsing File '{file.filename}'.");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("\n" + e.ToString());
 
         Environment.Exit(-1);
       }
@@ -2983,9 +3313,6 @@ namespace llsc
             var stringValue = nodes[6] as NStringValue;
             var arrayType = new ArrayCType(builtinType, stringValue.length);
             var value = new CNamedValue(nodes[4] as NName, arrayType, false, true);
-            value.homeStackOffset = scope.maxRequiredStackSpace.value;
-            value.hasStackOffset = true;
-            scope.maxRequiredStackSpace.value += arrayType.GetSize();
 
             scope.AddVariable(value);
             scope.instructions.Add(new CInstruction_SetArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
@@ -3045,12 +3372,16 @@ namespace llsc
 
             var arrayType = new ArrayCType(builtinType, valueCount);
             var value = new CNamedValue(nameNode, arrayType, false, true);
-            value.homeStackOffset = scope.maxRequiredStackSpace.value;
+            value.homeStackOffset = scope.maxRequiredStackSpace.Value;
             value.hasStackOffset = true;
-            scope.maxRequiredStackSpace.value += arrayType.GetSize();
+            scope.maxRequiredStackSpace.Value += arrayType.GetSize();
 
             scope.AddVariable(value);
             scope.instructions.Add(new CInstruction_SetArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
+
+            value.hasPosition = true;
+            value.position.inRegister = false;
+            value.position.stackOffsetForward = value.homeStackOffset;
           }
         }
         else
@@ -3088,6 +3419,7 @@ namespace llsc
           else
           {
             var lnodes = nodes.GetRange(0, firstEquals);
+            var equalsNode = nodes[firstEquals];
             var rnodes = nodes.GetRange(firstEquals + 1, nextEndLine - (firstEquals + 1));
             nodes.RemoveRange(0, nextEndLine + 1);
 
@@ -3099,8 +3431,9 @@ namespace llsc
             var lvalue = GetLValue(scope, lnodes, ref byteCodeState, rvalue.type);
 
             // TODO: Assign value.
+            scope.instructions.Add(new CInstruction_SetValueTo(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
 
-            rvalue.isInitialized = true;
+            lvalue.isInitialized = true;
           }
         }
       }

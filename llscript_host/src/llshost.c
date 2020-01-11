@@ -26,8 +26,10 @@
 #include <stdint.h>
 
 #define LOG_INSTRUCTION_NAME(x) do { if (!silent) printf("\r% 16" PRIX64 ": " #x " ", (uint64_t)(pCodePtr - 1 - pState->pCode)); } while (0)
+#define LOG_ENUM(x) do { if (!silent) printf(#x); } while (0)
 #define LOG_U8(x) do { if (!silent) printf("%" PRIu8 "", (uint8_t)(x)); } while (0)
 #define LOG_U64(x) do { if (!silent) printf("%" PRIu64 " (0x%" PRIX64 ")", (uint64_t)(x), (uint64_t)(x)); } while (0)
+#define LOG_X64(x) do { if (!silent) printf("0x%" PRIX64 "", (uint64_t)(x)); } while (0)
 #define LOG_I64(x) do { if (!silent) printf("%" PRIi64 " (0x%" PRIX64 ")", (int64_t)(x), (int64_t)(x)); } while (0)
 #define LOG_F64(x) do { if (!silent) printf("%f", (double)(x)); } while (0)
 #define LOG_DELIMITER() do { if (!silent) fputs(", ", stdout); } while (0)
@@ -36,8 +38,10 @@
 #define LOG_END() do { if (!silent) puts(""); } while (0)
 #else
 #define LOG_INSTRUCTION_NAME(x)
+#define LOG_ENUM(x)
 #define LOG_U8(x) 
 #define LOG_U64(x)
+#define LOG_X64(x)
 #define LOG_I64(x)
 #define LOG_F64(x)
 #define LOG_DELIMITER()
@@ -110,50 +114,50 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
           break;
 
         case 'p':
+        {
+          const size_t offset = (size_t)pStack - (size_t)pState->pStack;
+          printf("Stack Offset: %" PRIu64 "\n", offset);
+
+          uint8_t *pStackInspect = pStack - 64;
+
+          if (pStackInspect < pState->pStack)
+            pStackInspect = pState->pStack;
+
+          for (size_t i = 0; i < 64; i += 8)
           {
-            const size_t offset = (size_t)pStack - (size_t)pState->pStack;
-            printf("Stack Offset: %" PRIu64 "\n", offset);
+            if (i >= offset)
+              break;
 
-            uint8_t *pStackInspect = pStack - 64;
+            printf("\n -%02" PRIu64 ": ", (uint64_t)(pStack - (pStackInspect + i)));
 
-            if (pStackInspect < pState->pStack)
-              pStackInspect = pState->pStack;
-
-            for (size_t i = 0; i < 64; i += 8)
+            for (size_t j = 0; j < 8; j++)
             {
-              if (i >= offset)
-                break;
-
-              printf("\n -%02" PRIu64 ": ", (uint64_t)(pStack - (pStackInspect + i)));
-
-              for (size_t j = 0; j < 8; j++)
-              {
-                if (i + j >= offset)
-                  fputs("   ", stdout);
-                else
-                  printf("%02" PRIX8 " ", pStackInspect[i + j]);
-              }
-
-              fputs("\t", stdout);
-
-              for (size_t j = 0; j < 8; j++)
-              {
-                if (i + j >= offset)
-                  break;
-
-                const uint8_t value = pStackInspect[i + j];
-
-                if (value >= 0x20)
-                  printf("%c", (char)value);
-                else
-                  fputs("?", stdout);
-              }
+              if (i + j >= offset)
+                fputs("   ", stdout);
+              else
+                printf("%02" PRIX8 " ", pStackInspect[i + j]);
             }
 
-            puts("\n");
+            fputs("\t", stdout);
 
-            break;
+            for (size_t j = 0; j < 8; j++)
+            {
+              if (i + j >= offset)
+                break;
+
+              const uint8_t value = pStackInspect[i + j];
+
+              if (value >= 0x20)
+                printf("%c", (char)value);
+              else
+                fputs("?", stdout);
+            }
           }
+
+          puts("\n");
+
+          break;
+        }
 
         case 's':
           silent = ~silent;
@@ -525,7 +529,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       }
       ASSERT_NO_ELSE
 
-      break;
+        break;
     }
 
     case LLS_OP_POP_REGISTER:
@@ -550,7 +554,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       }
       ASSERT_NO_ELSE
 
-      break;
+        break;
     }
 
     case LLS_OP_STACK_INC_IMM:
@@ -699,61 +703,110 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       pCodePtr++;
 
       LOG_U8(target_register);
-      LOG_END();
 
-      switch (id_register)
+      IF_LAST_OPT(target_register < 8)
       {
-      case LLS_BF_ALLOC:
-        IF_LAST_OPT(target_register < 8)
+        switch (iregister[id_register])
         {
-          LPVOID (*HeapAlloc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = pState->pHeapAlloc;
+        case LLS_BF_ALLOC:
+          LOG_INFO_START();
+          LOG_ENUM(LLS_BF_ALLOC);
+          LOG_INFO_START();
+          LOG_X64(iregister[1]);
+          LOG_INFO_END();
+          LOG_INFO_END();
+          LOG_END();
 
-          iregister[target_register] = (uint64_t)HeapAlloc(pState->pHeapHandle, 0, iregister[1]);
+          IF_LAST_OPT(target_register < 8)
+          {
+            LPVOID(*HeapAlloc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = pState->pHeapAlloc;
+
+            iregister[target_register] = (uint64_t)HeapAlloc(pState->pHeapHandle, 0, iregister[1]);
+          }
+          ASSERT_NO_ELSE;
+          break;
+
+        case LLS_BF_FREE:
+          LOG_INFO_START();
+          LOG_ENUM(LLS_BF_FREE);
+          LOG_INFO_START();
+          LOG_X64(iregister[1]);
+          LOG_INFO_END();
+          LOG_INFO_END();
+          LOG_END();
+          {
+            BOOL(*HeapFree)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem) = pState->pHeapFree;
+
+            HeapFree(pState->pHeapHandle, 0, iregister[1]);
+
+            break;
+          }
+
+        case LLS_BF_REALLOC:
+          LOG_INFO_START();
+          LOG_ENUM(LLS_BF_REALLOC);
+          LOG_INFO_START();
+          LOG_X64(iregister[1]);
+          LOG_DELIMITER();
+          LOG_X64(iregister[2]);
+          LOG_INFO_END();
+          LOG_INFO_END();
+          LOG_END();
+
+          IF_LAST_OPT(target_register < 8)
+          {
+            LPVOID(*HeapReAlloc)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem, SIZE_T dwBytes) = pState->pHeapRealloc;
+
+            iregister[target_register] = HeapReAlloc(pState->pHeapHandle, 0, iregister[1], iregister[2]);
+          }
+          ASSERT_NO_ELSE;
+          break;
+
+        case LLS_BF_LOAD_LIBRARY:
+          LOG_INFO_START();
+          LOG_ENUM(LLS_BF_LOAD_LIBRARY);
+          LOG_INFO_START();
+          LOG_X64(iregister[1]);
+          LOG_INFO_END();
+          LOG_INFO_END();
+          LOG_END();
+
+          IF_LAST_OPT(target_register < 8)
+          {
+            HMODULE(*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
+
+            iregister[target_register] = LoadLibraryA(iregister[1]);
+          }
+          ASSERT_NO_ELSE;
+          break;
+
+        case LLS_BF_GET_PROC_ADDRESS:
+          LOG_INFO_START();
+          LOG_ENUM(LLS_BF_GET_PROC_ADDRESS);
+          LOG_INFO_START();
+          LOG_X64(iregister[1]);
+          LOG_DELIMITER();
+          LOG_X64(iregister[2]);
+          LOG_INFO_END();
+          LOG_INFO_END();
+          LOG_END();
+
+          IF_LAST_OPT(target_register < 8)
+          {
+            FARPROC(*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
+
+            iregister[target_register] = GetProcAddress(iregister[1], iregister[2]);
+          }
+          ASSERT_NO_ELSE;
+          break;
+
+        default:
+          LOG_INFO_START();
+          LOG_ENUM(INVALID_BUILTIN_FUNCTION);
+          LOG_INFO_END();
+          LOG_END();
+          __debugbreak();
         }
-        ASSERT_NO_ELSE;
-        break;
-        
-      case LLS_BF_FREE:
-      {
-        BOOL (*HeapFree)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem) = pState->pHeapFree;
-
-        HeapFree(pState->pHeapHandle, 0, iregister[1]);
-
-        break;
-      }
-
-      case LLS_BF_REALLOC:
-        IF_LAST_OPT(target_register < 8)
-        {
-          LPVOID (*HeapReAlloc)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem, SIZE_T dwBytes) = pState->pHeapRealloc;
-
-          iregister[target_register] = HeapReAlloc(pState->pHeapHandle, 0, iregister[1], iregister[2]);
-        }
-        ASSERT_NO_ELSE;
-        break;
-
-      case LLS_BF_LOAD_LIBRARY:
-        IF_LAST_OPT(target_register < 8)
-        {
-          HMODULE (*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
-
-          iregister[target_register] = LoadLibraryA(iregister[1]);
-        }
-        ASSERT_NO_ELSE;
-        break;
-
-      case LLS_BF_GET_PROC_ADDRESS:
-        IF_LAST_OPT(target_register < 8)
-        {
-          FARPROC (*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
-
-          iregister[target_register] = GetProcAddress(iregister[1], iregister[2]);
-        }
-        ASSERT_NO_ELSE;
-        break;
-
-      default:
-        __debugbreak();
       }
 
       break;

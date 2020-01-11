@@ -47,6 +47,8 @@ int32_t main(const int32_t argc, const char **pArgv)
     return -1;
   }
 
+  fclose(pFile);
+
 #pragma warning(push)
 #pragma warning(disable: 4054)
   llshost(pByteCode, (void *)&__lls__call_func);
