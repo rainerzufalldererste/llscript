@@ -257,6 +257,20 @@ namespace llsc
     public override string ToString() => "'func'";
   }
 
+  public class NVarKeyword : Node
+  {
+    public NVarKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'var'";
+  }
+
+  public class NCastKeyword : Node
+  {
+    public NCastKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'cast'";
+  }
+
   public class NStringValue : Node
   {
     public readonly string value;
@@ -431,6 +445,8 @@ namespace llsc
 
   public abstract class CType
   {
+    public CType explicitCast = null;
+
     public abstract long GetSize();
 
     public override bool Equals(object obj) => false;
@@ -447,9 +463,11 @@ namespace llsc
       return !a.Equals(b);
     }
 
-    public virtual bool CanImplicitCastTo(CType type) => false;
-    
-    public virtual bool CanExplicitCastTo(CType type) => false;
+    public virtual bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || Equals(type);
+
+    public virtual bool CanExplicitCastTo(CType type) => CanImplicitCastTo(type);
+
+    public abstract CType MakeCastableClone(CType targetType);
   }
 
   public class VoidCType : CType
@@ -465,6 +483,8 @@ namespace llsc
     public override bool Equals(object obj) => obj is VoidCType;
 
     public override int GetHashCode() => 0x13579bdf;
+
+    public override CType MakeCastableClone(CType targetType) => new VoidCType() { explicitCast = targetType };
   }
 
   public enum BuiltInTypes
@@ -579,9 +599,11 @@ namespace llsc
       }
     }
 
-    public override bool CanImplicitCastTo(CType type) => type is BuiltInCType && !(IsFloat() ^ (type as BuiltInCType).IsFloat()) && GetSize() <= type.GetSize();
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is BuiltInCType && !(IsFloat() ^ (type as BuiltInCType).IsFloat()) && GetSize() <= type.GetSize());
 
     public override bool CanExplicitCastTo(CType type) => type is BuiltInCType || (!IsFloat() && GetSize() == type.GetSize() && (type is PtrCType || type is ExternFuncCType || type is ExternFuncCType || type is FuncCType));
+
+    public override CType MakeCastableClone(CType targetType) => new BuiltInCType(type) { explicitCast = targetType };
   }
 
   public class PtrCType : CType
@@ -600,9 +622,11 @@ namespace llsc
 
     public override string ToString() => "ptr<" + pointsTo.ToString() + ">";
 
-    public override bool CanImplicitCastTo(CType type) => type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo);
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo));
 
-    public override bool CanExplicitCastTo(CType type) => type is PtrCType || (type is BuiltInCType && !(type as BuiltInCType).IsFloat() && type.GetSize() == GetSize());
+    public override bool CanExplicitCastTo(CType type) => type is PtrCType || (type is BuiltInCType && !(type as BuiltInCType).IsFloat() && type.GetSize() == GetSize()) || type is FuncCType || type is ExternFuncCType;
+
+    public override CType MakeCastableClone(CType targetType) => new PtrCType(pointsTo) { explicitCast = targetType };
   }
 
   public class ArrayCType : CType
@@ -624,9 +648,11 @@ namespace llsc
 
     public override string ToString() => "array<" + type.ToString() + ", " + count + ">";
 
-    public override bool CanImplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type);
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type));
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || type is PtrCType;
+
+    public override CType MakeCastableClone(CType targetType) => new ArrayCType(type, count) { explicitCast = targetType };
   }
 
   public class ExternFuncCType : CType
@@ -687,9 +713,11 @@ namespace llsc
       return ret;
     }
 
-    public override bool CanImplicitCastTo(CType type) => this.Equals(type);
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || this.Equals(type);
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
+
+    public override CType MakeCastableClone(CType targetType) => new ExternFuncCType(returnType, parameterTypes) { explicitCast = targetType };
   }
 
   public class FuncCType : CType
@@ -750,9 +778,11 @@ namespace llsc
       return ret;
     }
 
-    public override bool CanImplicitCastTo(CType type) => this.Equals(type);
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || this.Equals(type);
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
+
+    public override CType MakeCastableClone(CType targetType) => new FuncCType(returnType, parameterTypes) { explicitCast = targetType };
   }
 
   public class StructCType : CType
@@ -803,6 +833,8 @@ namespace llsc
     {
       return "struct " + name;
     }
+
+    public override CType MakeCastableClone(CType targetType) => throw new Exception("Internal Compiler Error: Structs cannot be type converted.");
   }
 
   public class StructAttribute
@@ -827,16 +859,23 @@ namespace llsc
 
   public class CValue
   {
-    public readonly CType type;
-    public readonly string file;
-    public readonly int line;
+    public CType type { get; protected set; }
+
+    public string file { get; protected set; }
+
+    public int line { get; protected set; }
+
     public bool isInitialized;
     public Position position;
     public bool hasPosition = false;
 
     public int remainingReferences = 0;
-    public readonly bool isConst;
+
+    public bool isConst { get; protected set; }
+
     public int lastTouchedInstructionCount = 0;
+
+    protected CValue() { }
 
     public CValue(string file, int line, CType type, bool isConst, bool isInitialized)
     {
@@ -848,12 +887,42 @@ namespace llsc
     }
 
     public override string ToString() => "unnamed value [" + (isConst ? "const " : "") + type + "]";
+
+    public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
+    {
+      var ret = new CValue();
+      ret.type = type;
+      ret.file = file;
+      ret.line = line;
+      ret.isInitialized = isInitialized;
+      ret.position = position;
+      ret.hasPosition = hasPosition;
+      ret.remainingReferences = remainingReferences;
+      ret.isConst = isConst;
+      ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+
+      return ret;
+    }
+
+    public virtual CValue MakeCastableClone(CType targetType, Scope scope, ref ByteCodeState byteCodeState)
+    {
+      var ret = this.DeepClone(scope, ref byteCodeState);
+
+      ret.type = type.MakeCastableClone(targetType);
+
+      return ret;
+    }
   }
 
   public class CConstValue : CValue
   {
-    public readonly ulong uvalue;
-    public readonly long ivalue;
+    public ulong uvalue { get; protected set; }
+
+    public long ivalue { get; protected set; }
+
+    protected CConstValue() : base() { }
 
     public CConstValue(ulong value, CType type, string file, int line) : base(file, line, type, true, true)
     {
@@ -909,14 +978,37 @@ namespace llsc
     }
 
     public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")";
+
+    public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
+    {
+      var ret = new CConstValue();
+      ret.type = type;
+      ret.file = file;
+      ret.line = line;
+      ret.isInitialized = isInitialized;
+      ret.position = position;
+      ret.hasPosition = hasPosition;
+      ret.remainingReferences = remainingReferences;
+      ret.isConst = isConst;
+      ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+
+      ret.uvalue = uvalue;
+      ret.ivalue = ivalue;
+
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+
+      return ret;
+    }
   }
 
   public class CNamedValue : CValue
   {
-    public readonly string name;
+    public string name { get; protected set; }
     public bool hasStackOffset = false;
     public long homeStackOffset;
     public bool modifiedSinceLastHome = false;
+
+    protected CNamedValue() : base() { }
 
     public CNamedValue(NName name, CType type, bool isConst, bool isInitialized) : base(name.file, name.line, type, isConst, isInitialized)
     {
@@ -929,6 +1021,29 @@ namespace llsc
     }
 
     public override string ToString() => (isConst ? "const " : "") + type + " " + name;
+
+    public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
+    {
+      var ret = new CNamedValue();
+      ret.type = type;
+      ret.file = file;
+      ret.line = line;
+      ret.isInitialized = isInitialized;
+      ret.position = position;
+      ret.hasPosition = hasPosition;
+      ret.remainingReferences = remainingReferences;
+      ret.isConst = isConst;
+      ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+
+      ret.name = name;
+      ret.hasStackOffset = false;
+      ret.homeStackOffset = 0;
+      ret.modifiedSinceLastHome = false;
+
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+
+      return ret;
+    }
   }
 
   public class FileContents
@@ -1623,7 +1738,7 @@ namespace llsc
         if (!sourceValue.hasPosition)
           throw new Exception("Internal Compiler Error: Move To Position, but source value has no origin and is not constant.");
 
-        if (sourceValue.position.inRegister == targetPosition.inRegister && ((targetPosition.inRegister && sourceValue.position.registerIndex == targetPosition.registerIndex) || (!targetPosition.inRegister && sourceValue.position.stackOffsetForward == targetPosition.stackOffsetForward)))
+        /* if (sourceValue.position.inRegister == targetPosition.inRegister && ((targetPosition.inRegister && sourceValue.position.registerIndex == targetPosition.registerIndex) || (!targetPosition.inRegister && sourceValue.position.stackOffsetForward == targetPosition.stackOffsetForward)))
         {
           // Everything already set up.
           if (targetPosition.inRegister)
@@ -1639,7 +1754,7 @@ namespace llsc
             sourceValue.lastTouchedInstructionCount = instructions.Count;
           }
         }
-        else if (targetPosition.inRegister)
+        else */if (targetPosition.inRegister)
         {
           if (sourceValue.position.inRegister)
           {
@@ -2460,7 +2575,7 @@ namespace llsc
         return;
 
       if (!sourceValue.hasPosition)
-        throw new Exception("Internal Compiler Error: Source Value has no position.");
+        throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
 
       if (!targetValue.hasPosition)
       {
@@ -2575,6 +2690,25 @@ namespace llsc
       }
 
       function.parameters = originalParameters;
+    }
+  }
+
+  public class CInstruction_CopyPositionFromValueToValue : CInstruction
+  {
+    CValue source, target;
+
+    public CInstruction_CopyPositionFromValueToValue(CValue source, CValue target) : base(null, 0)
+    {
+      this.source = source;
+      this.target = target;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      target.hasPosition = source.hasPosition;
+      target.position.inRegister = source.hasPosition;
+      target.position.registerIndex = source.position.registerIndex;
+      target.position.stackOffsetForward = source.position.stackOffsetForward;
     }
   }
 
@@ -2698,12 +2832,12 @@ namespace llsc
     {
       Console.ForegroundColor = ConsoleColor.Red;
 
-      Console.Write("Error");
+      Console.Write("\nError");
 
       if (file != null)
         Console.Write($" (in '{file}', Line {line + 1})");
 
-      Console.WriteLine(":\n\t" + error);
+      Console.WriteLine(":\n\t" + error + "\n");
       Console.ResetColor();
 
       throw new CompileFailureException();
@@ -2715,12 +2849,12 @@ namespace llsc
       {
         Console.ForegroundColor = ConsoleColor.Yellow;
 
-        Console.Write("Warning");
+        Console.Write("\nWarning");
 
         if (file != null)
           Console.Write($" (in '{file}', Line {line + 1})");
 
-        Console.WriteLine(":\n\t" + warning);
+        Console.WriteLine(":\n\t" + warning + "\n");
         Console.ResetColor();
       }
 
@@ -2897,7 +3031,7 @@ namespace llsc
                 nodes.Add(new NDereferenceAttributeOperator(file.filename, line));
                 start += 2;
               }
-              else if (lineString.NextIs(start, "==") || lineString.NextIs(start, "!=") || lineString.NextIs(start, "<=") || lineString.NextIs(start, ">=") || lineString.NextIs(start, "<<") || lineString.NextIs(start, ">>") || lineString.NextIs(start, "++") || lineString.NextIs(start, "--") || lineString.NextIs(start, "&&") || lineString.NextIs(start, "||"))
+              else if (lineString.NextIs(start, "==") || lineString.NextIs(start, "!=") || lineString.NextIs(start, "<=") || lineString.NextIs(start, ">=") || lineString.NextIs(start, "++") || lineString.NextIs(start, "--") || lineString.NextIs(start, "&&") || lineString.NextIs(start, "||"))
               {
                 nodes.Add(new NOperator(lineString.Substring(start, 2), file.filename, line));
                 start += 2;
@@ -3023,6 +3157,14 @@ namespace llsc
               file.nodes[i] = new NPtrKeyword(node.file, node.line);
               break;
 
+            case "var":
+              file.nodes[i] = new NVarKeyword(node.file, node.line);
+              break;
+
+            case "cast":
+              file.nodes[i] = new NCastKeyword(node.file, node.line);
+              break;
+
             case "array":
               file.nodes[i] = new NArrayKeyword(node.file, node.line);
               break;
@@ -3101,6 +3243,86 @@ namespace llsc
           nodes.RemoveRange(i, 6);
           nodes.Insert(i, new NType(new ArrayCType(type.type, (long)size.uint_value), start.file, start.line));
         }
+        // extern_func / func.
+        else if ((nodes[i] is NFuncKeyword || nodes[i] is NExternFuncKeyword) && nodes.NextIs(i + 1, typeof(NOperator), typeof(NType), typeof(NOpenParanthesis)) && (nodes[i + 1] as NOperator).operatorType == "<")
+        {
+          var funcTypeNode = nodes[i];
+          var returnType = (nodes[i + 2] as NType).type;
+
+          int j = i + 4;
+          bool aborted = false;
+          List<CType> parameters = new List<CType>();
+
+          while (true)
+          {
+            if (nodes.Count <= j)
+            {
+              Error($"Unexpected end of function type definition.", funcTypeNode.file, funcTypeNode.line);
+            }
+            else if (nodes[j] is NOperator && (nodes[j] as NOperator).operatorType == ">")
+            {
+              j++;
+              break;
+            }
+            else if (nodes[j] is NType)
+            {
+              parameters.Add((nodes[j] as NType).type);
+              j++;
+
+              if (nodes.Count <= j)
+              {
+                Error($"Unexpected end of function type definition.", funcTypeNode.file, funcTypeNode.line);
+              }
+              else if (nodes[j] is NComma)
+              {
+                j++;
+              }
+              else if (nodes[j] is NCloseParanthesis)
+              {
+                j++;
+                break;
+              }
+              else
+              {
+                Error($"Unexpected '{nodes[j]}' in function type definition.", funcTypeNode.file, funcTypeNode.line);
+              }
+            }
+            else if (nodes[j] is NName)
+            {
+              aborted = true;
+              break;
+            }
+            else
+            {
+              Error($"Unexpected '{nodes[j]}' in function type definition.", funcTypeNode.file, funcTypeNode.line);
+            }
+          }
+
+          if (nodes.Count <= j)
+          {
+            Error($"Unexpected end of function type definition.", funcTypeNode.file, funcTypeNode.line);
+          }
+          else if (nodes[j] is NOperator && (nodes[j] as NOperator).operatorType == ">")
+          {
+            j++;
+          }
+          else
+          {
+            Error($"Unexpected '{nodes[j]}' in function type definition.", funcTypeNode.file, funcTypeNode.line);
+          }
+
+          if (!aborted)
+          {
+            nodes.RemoveRange(i, j - i);
+
+            if (funcTypeNode is NFuncKeyword)
+              nodes.Insert(i, new NType(new FuncCType(returnType, parameters), funcTypeNode.file, funcTypeNode.line));
+            else if (funcTypeNode is NExternFuncKeyword)
+              nodes.Insert(i, new NType(new ExternFuncCType(returnType, parameters), funcTypeNode.file, funcTypeNode.line));
+            else
+              throw new Exception("Internal Compiler Error");
+          }
+        }
       }
     }
 
@@ -3119,6 +3341,8 @@ namespace llsc
       {
         if (nodes.Count == 0)
           throw new Exception("Internal Compiler Error: The Global Scope does not contain any nodes, but CompileScope was called on it.");
+
+        PatchTypes(scope, ref nodes);
 
         // Add Builtin Functions.
         foreach (var function in CBuiltInFunction.Functions)
@@ -3478,6 +3702,18 @@ namespace llsc
 
         return value;
       }
+      else if (nodes.Count == 2 && nodes.NextIs(typeof(NVarKeyword), typeof(NName)))
+      {
+        if (rValueType == null)
+          Error($"Cannot deduct type for {nodes[1]}. {nodes[0]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
+
+        var name = nodes[1] as NName;
+
+        var value = new CNamedValue(name, rValueType, false, false);
+        scope.AddVariable(value);
+
+        return value;
+      }
       else if (nodes[0] is NName)
       {
         var value = scope.GetVariable((nodes[0] as NName).name);
@@ -3586,7 +3822,15 @@ namespace llsc
           if (function.returnType is VoidCType)
             Error($"Invalid return type '{function.returnType}' of rvalue function call to '{function}'.", nameNode.file, nameNode.line);
 
-          if (nodes.Count == 1 || !(nodes[1] is NOpenParanthesis))
+          if (nodes.Count == 1)
+          {
+            if (function is CBuiltInFunction)
+              Error($"Cannot retrieve the address of builtin function.", nameNode.file, nameNode.line);
+
+            throw new NotImplementedException("Return ptr to function.");
+          }
+
+          if (!(nodes[1] is NOpenParanthesis))
             Error($"Incomplete or invalid reference to function '{(nodes[0] as NName).name}'.", nodes[0].file, nodes[0].line);
 
           nodes.RemoveRange(0, 2);
@@ -3630,6 +3874,20 @@ namespace llsc
 
           return returnValue;
         }
+      }
+      else if (nodes.NextIs(typeof(NCastKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NOpenParanthesis)) && (nodes[1] as NOperator).operatorType == "<" && (nodes[3] as NOperator).operatorType == ">" && nodes.Count > 5 && nodes.Last() is NCloseParanthesis)
+      {
+        var targetType = (nodes[2] as NType).type;
+        var rValueToCast = GetRValue(scope, nodes.GetRange(5, nodes.Count - 6), ref byteCodeState);
+
+        if (rValueToCast.type.Equals(targetType))
+          return rValueToCast;
+        else if (!rValueToCast.type.CanExplicitCastTo(targetType) && !rValueToCast.type.CanImplicitCastTo(targetType))
+          Error($"Explicit cast from type '{rValueToCast.type}' to type '{targetType}' is not possible for value '{rValueToCast}' (Defined in File '{rValueToCast.file ?? "?"}', Line {rValueToCast.line}).", nodes[0].file, nodes[0].line);
+        else
+          return rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState);
+
+        return null; // Unreachable.
       }
       else
       {
