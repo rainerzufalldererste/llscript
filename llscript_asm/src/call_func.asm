@@ -20,6 +20,7 @@ ENDM
 
 .code
 dq 0F1F840000000000H ; this is a nop statement that will be looked for.
+dq 9090909090909090H ; more nops.
 
 ; this actually is:
 ;  uint64_t __lls__call_func(const uint64_t *pStack);
@@ -51,11 +52,11 @@ __lls__call_func:
 ; Reserve Stack Space.
 sub rsp, 8
 
-; Move to the beginning of the stack.
-sub rax, 8
-
 ; Move script stack ptr to rax.
 mov rax, rcx
+
+; Move to the beginning of the stack.
+sub rax, 8
 
 ; Param 1
 M_JUMP_TO_DO_CALL_IF_LAST
