@@ -655,30 +655,30 @@ namespace llsc
     public override CType MakeCastableClone(CType targetType) => new ArrayCType(type, count) { explicitCast = targetType };
   }
 
-  public class ExternFuncCType : CType
+  public class _FuncCTypeWrapper : CType
   {
-    public readonly CType[] parameterTypes;
+    public readonly CType[] parameters;
     public readonly CType returnType;
 
-    public ExternFuncCType(CType returns, IEnumerable<CType> parameters)
+    public _FuncCTypeWrapper(CType returns, IEnumerable<CType> parameters)
     {
       returnType = returns;
-      parameterTypes = parameters.ToArray();
+      this.parameters = parameters.ToArray();
     }
 
     public override long GetSize() => 8;
 
     public override bool Equals(object obj)
     {
-      if (obj is ExternFuncCType)
+      if (obj is _FuncCTypeWrapper)
       {
-        ExternFuncCType other = (obj as ExternFuncCType);
+        _FuncCTypeWrapper other = (obj as _FuncCTypeWrapper);
 
-        if (other.returnType != returnType || other.parameterTypes.Length != parameterTypes.Length)
+        if (other.returnType != returnType || other.parameters.Length != parameters.Length)
           return false;
-        
-        for (int i = 0; i < parameterTypes.Length; i++)
-          if (!other.parameterTypes[i].Equals(parameterTypes[i]))
+
+        for (int i = 0; i < parameters.Length; i++)
+          if (!other.parameters[i].Equals(parameters[i]))
             return false;
 
         return true;
@@ -692,97 +692,73 @@ namespace llsc
       int hashCode = ~returnType.GetHashCode();
       int parameterIndex = 1;
 
-      foreach (var type in parameterTypes)
+      foreach (var type in parameters)
         hashCode ^= (type.GetHashCode() + parameterIndex++);
 
       return hashCode;
     }
+
+    public override CType MakeCastableClone(CType targetType) => throw new Exception("Internal Compiler Error. Please override this function.");
+  }
+
+  public class ExternFuncCType : _FuncCTypeWrapper
+  {
+    public ExternFuncCType(CType returns, IEnumerable<CType> parameters) : base(returns, parameters) { }
 
     public override string ToString()
     {
       string ret = "extern_func<" + returnType.ToString() + " (";
 
-      for (int i = 0; i < parameterTypes.Length; i++)
+      for (int i = 0; i < parameters.Length; i++)
       {
-        ret += parameterTypes[i].ToString();
+        ret += parameters[i].ToString();
 
-        if (i + 1 < parameterTypes.Length)
+        if (i + 1 < parameters.Length)
           ret += ", ";
       }
 
-      return ret;
+      return ret += ")>";
     }
+
+    public override bool Equals(object obj) => base.Equals(obj) && obj is ExternFuncCType;
+
+    public override int GetHashCode() => base.GetHashCode();
 
     public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || this.Equals(type);
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
 
-    public override CType MakeCastableClone(CType targetType) => new ExternFuncCType(returnType, parameterTypes) { explicitCast = targetType };
+    public override CType MakeCastableClone(CType targetType) => new ExternFuncCType(returnType, parameters) { explicitCast = targetType };
   }
 
-  public class FuncCType : CType
+  public class FuncCType : _FuncCTypeWrapper
   {
-    public readonly CType[] parameterTypes;
-    public readonly CType returnType;
+    public FuncCType(CType returns, IEnumerable<CType> parameters) : base(returns, parameters) { }
 
-    public FuncCType(CType returns, IEnumerable<CType> parameters)
-    {
-      returnType = returns;
-      parameterTypes = parameters.ToArray();
-    }
+    public override bool Equals(object obj) => base.Equals(obj) && obj is FuncCType;
 
-    public override long GetSize() => 8;
-
-    public override bool Equals(object obj)
-    {
-      if (obj is FuncCType)
-      {
-        FuncCType other = (obj as FuncCType);
-
-        if (other.returnType != returnType || other.parameterTypes.Length != parameterTypes.Length)
-          return false;
-
-        for (int i = 0; i < parameterTypes.Length; i++)
-          if (!other.parameterTypes[i].Equals(parameterTypes[i]))
-            return false;
-
-        return true;
-      }
-
-      return false;
-    }
-
-    public override int GetHashCode()
-    {
-      int hashCode = ~(-returnType.GetHashCode());
-      int parameterIndex = 1;
-
-      foreach (var type in parameterTypes)
-        hashCode ^= (type.GetHashCode() + parameterIndex++);
-
-      return hashCode;
-    }
+    public override int GetHashCode() => ~base.GetHashCode();
 
     public override string ToString()
     {
       string ret = "func<" + returnType.ToString() + " (";
 
-      for (int i = 0; i < parameterTypes.Length; i++)
+      for (int i = 0; i < parameters.Length; i++)
       {
-        ret += parameterTypes[i].ToString();
+        ret += parameters[i].ToString();
 
-        if (i + 1 < parameterTypes.Length)
+        if (i + 1 < parameters.Length)
           ret += ", ";
       }
 
-      return ret;
+      return ret += ")>";
     }
 
     public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || this.Equals(type);
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo is VoidCType);
 
-    public override CType MakeCastableClone(CType targetType) => new FuncCType(returnType, parameterTypes) { explicitCast = targetType };
+    public override CType MakeCastableClone(CType targetType) => new FuncCType(returnType, parameters) { explicitCast = targetType };
   }
 
   public class StructCType : CType
@@ -2348,6 +2324,22 @@ namespace llsc
     }
   }
 
+  public class LLI_CallExternFunction_ResultToRegister : LLInstruction
+  {
+    byte resultRegister;
+
+    public LLI_CallExternFunction_ResultToRegister(byte resultRegister) : base(1 + 1)
+    {
+      this.resultRegister = resultRegister;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER);
+      byteCode.Add(resultRegister);
+    }
+  }
+
   public abstract class CInstruction
   {
     public readonly string file;
@@ -2633,7 +2625,7 @@ namespace llsc
 
       if (arguments.Count != function.parameters.Length)
         Compiler.Error($"Invalid parameter count for function '{function}'. {arguments.Count} parameters given, {function.parameters.Length} expected.", file, line);
-      
+
       for (int i = 0; i < arguments.Count; i++)
       {
         if (!arguments[i].isInitialized)
@@ -2661,11 +2653,19 @@ namespace llsc
 
       for (int i = arguments.Count - 1; i >= 0; i--)
       {
+        if (function.returnType is ArrayCType || function.returnType is StructCType)
+          throw new NotImplementedException();
+
         var targetPosition = function.parameters[i].value.position;
         var sourceValue = arguments[i];
 
+        if (!targetPosition.inRegister)
+          targetPosition.stackOffsetForward = -targetPosition.stackOffsetForward;
+
         byteCodeState.MoveValueToPositionWithCast(sourceValue, targetPosition, function.parameters[i].type, stackSize, true);
       }
+
+      byteCodeState.instructions.Add(new LLI_StackIncrementImm(function.callStackSize));
 
       if (function is CBuiltInFunction)
       {
@@ -2689,7 +2689,191 @@ namespace llsc
         throw new NotImplementedException();
       }
 
+      byteCodeState.instructions.Add(new LLI_StackDecrementImm(function.callStackSize));
+
       function.parameters = originalParameters;
+    }
+  }
+
+  public class CInstruction_CallFunctionPtr : CInstruction
+  {
+    private readonly CValue functionPtr;
+    private readonly List<CValue> arguments;
+    private readonly CValue returnValue;
+    private readonly SharedValue<long> stackSize;
+
+    public CInstruction_CallFunctionPtr(CValue functionPtr, List<CValue> arguments, out CValue returnValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
+    {
+      this.functionPtr = functionPtr;
+      this.arguments = arguments;
+      this.stackSize = stackSize;
+
+      var functionType = functionPtr.type;
+
+      if (!(functionType is FuncCType || functionType is ExternFuncCType))
+        throw new Exception($"Internal Compiler Error: Attempting to call '{functionType}' which is neither a 'func' nor an 'extern_func'.");
+
+      var function = functionType as _FuncCTypeWrapper;
+
+      if (arguments.Count != function.parameters.Length)
+        Compiler.Error($"Invalid parameter count for function '{function}'. {arguments.Count} parameters given, {function.parameters.Length} expected.", file, line);
+
+      for (int i = 0; i < arguments.Count; i++)
+      {
+        if (!arguments[i].isInitialized)
+          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' has not been initialized yet. Defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+
+        if (!arguments[i].type.CanImplicitCastTo(function.parameters[i]))
+          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+      }
+
+      if (function.returnType is BuiltInCType || function.returnType is PtrCType)
+        this.returnValue = new CValue(file, line, function.returnType, true, true);
+      else if (!(function.returnType is VoidCType))
+        throw new NotImplementedException();
+      else
+        this.returnValue = null;
+
+      returnValue = this.returnValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (functionPtr.type is FuncCType)
+      {
+        throw new NotImplementedException();
+      }
+      else if (functionPtr.type is ExternFuncCType)
+      {
+        long pushedBytes = 0;
+        int chosenIntRegister = -1;
+        int chosenFloatRegister = -1;
+        int returnValueRegister = -1;
+
+        if (!functionPtr.hasPosition)
+          throw new Exception("Internal Compiler Error. Function Ptr has no Position.");
+
+        if (functionPtr.position.inRegister)
+          chosenIntRegister = functionPtr.position.registerIndex;
+
+        var function = functionPtr.type as ExternFuncCType;
+
+        if (function.returnType is VoidCType)
+        {
+          if (returnValueRegister == -1)
+            returnValueRegister = chosenIntRegister = byteCodeState.GetTriviallyFreeIntegerRegister();
+
+          if (returnValueRegister == -1)
+            returnValueRegister = chosenFloatRegister = byteCodeState.GetTriviallyFreeFloatRegister();
+
+          if (returnValueRegister == -1)
+            returnValueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+        }
+        else if (function.returnType is BuiltInCType && (function.returnType as BuiltInCType).IsFloat())
+        {
+          returnValueRegister = chosenFloatRegister = byteCodeState.GetFreeFloatRegister(stackSize);
+          byteCodeState.registers[chosenFloatRegister] = null;
+        }
+        else if (chosenIntRegister != -1)
+        {
+          returnValueRegister = chosenIntRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+          byteCodeState.registers[chosenIntRegister] = null;
+        }
+
+        foreach (var param in function.parameters)
+        {
+          if (param is BuiltInCType && (param as BuiltInCType).IsFloat())
+          {
+            if (chosenFloatRegister == -1)
+            {
+              chosenFloatRegister = byteCodeState.GetFreeFloatRegister(stackSize);
+              byteCodeState.registers[chosenFloatRegister] = null;
+            }
+          }
+          else
+          {
+            if (chosenIntRegister == -1)
+            {
+              chosenIntRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+              byteCodeState.registers[chosenIntRegister] = null;
+            }
+          }
+        }
+
+        // Function Pointer.
+        if (functionPtr.position.inRegister)
+        {
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)functionPtr.position.registerIndex));
+          pushedBytes += 8;
+        }
+        else
+        {
+          byteCodeState.instructions.Add(new LLI_MovStackOffsetToStackOffset(stackSize, functionPtr.position.stackOffsetForward + pushedBytes, new SharedValue<long>(0), 0));
+          byteCodeState.instructions.Add(new LLI_StackIncrementImm(8));
+          pushedBytes += 8;
+        }
+
+        // Type of return value.
+        {
+          if (function.returnType is BuiltInCType && (function.returnType as BuiltInCType).IsFloat())
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)1)));
+          else
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)0)));
+
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          pushedBytes += 8;
+        }
+
+        // Signal Last Argument.
+        {
+          byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)0)));
+
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          pushedBytes += 8;
+        }
+
+        // Push Arguments to the Stack.
+        for (int i = function.parameters.Length - 1; i >= 0; i--)
+        {
+          byteCodeState.instructions.Add(new LLI_StackDecrementImm(pushedBytes));
+
+          Position targetPosition = Position.Register(returnValueRegister);
+          byteCodeState.MoveValueToPositionWithCast(this.arguments[i], targetPosition, function.parameters[i], stackSize, false);
+          byteCodeState.instructions.Add(new LLI_StackIncrementImm(pushedBytes));
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          pushedBytes += 8;
+
+          if (function.parameters[i] is BuiltInCType && (function.parameters[i] as BuiltInCType).IsFloat())
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((long)-1)));
+          else
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)1)));
+
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          pushedBytes += 8;
+        }
+
+        // Perform Call.
+        byteCodeState.instructions.Add(new LLI_CallExternFunction_ResultToRegister((byte)returnValueRegister));
+
+        // Cleanup Stack.
+        byteCodeState.instructions.Add(new LLI_StackDecrementImm(pushedBytes));
+
+        // Set Return Value.
+        if (function.returnType is VoidCType)
+        {
+          // do nothing.
+        }
+        else
+        {
+          returnValue.hasPosition = true;
+          returnValue.position.inRegister = true;
+          returnValue.position.registerIndex = returnValueRegister;
+        }
+      }
+      else
+      {
+        throw new Exception("Internal Compiler Error.");
+      }
     }
   }
 
@@ -2865,6 +3049,8 @@ namespace llsc
     [STAThread]
     static void Main(string[] args)
     {
+      Console.WriteLine("llsc - LLS Bytecode Compiler\n");
+
       string outFileName = "bytecode.lls";
 
       try
@@ -2927,6 +3113,7 @@ namespace llsc
         Console.WriteLine($"Code Generation Succeeded. ({byteCodeState.byteCode.Count} Bytes)");
 
         File.WriteAllBytes(outFileName, byteCodeState.byteCode.ToArray());
+        Console.WriteLine($"Successfully wrote byte code to '{outFileName}'.");
       }
       catch (CompileFailureException e)
       {
@@ -3707,6 +3894,9 @@ namespace llsc
         if (rValueType == null)
           Error($"Cannot deduct type for {nodes[1]}. {nodes[0]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
 
+        if (rValueType.explicitCast != null)
+          rValueType = rValueType.explicitCast;
+
         var name = nodes[1] as NName;
 
         var value = new CNamedValue(name, rValueType, false, false);
@@ -3717,13 +3907,64 @@ namespace llsc
       else if (nodes[0] is NName)
       {
         var value = scope.GetVariable((nodes[0] as NName).name);
+        var nameNode = nodes[0];
 
         if (value != null)
         {
           if (nodes.Count > 1)
           {
-            // TODO: '.', '->', '('
-            throw new NotImplementedException();
+            // Call to extern_func or func.
+            if ((value.type is ExternFuncCType || value.type is FuncCType) && nodes[1] is NOpenParanthesis)
+            {
+              if (!((value.type as _FuncCTypeWrapper).returnType is VoidCType))
+                Warn($"lvalue call to '{value}' will discard the return value of type '{(value.type as _FuncCTypeWrapper).returnType}'.", nameNode.file, nameNode.line);
+
+              nodes.RemoveRange(0, 2);
+
+              List<CValue> parameters = new List<CValue>();
+
+              while (true)
+              {
+                if (nodes.Count == 0)
+                {
+                  Error($"Unexpected end of function call to '{value}'.", nameNode.file, nameNode.line);
+                }
+                else
+                {
+                  int nextCommaOrClosingParenthesis = nodes.FindNextSelfScope(n => n is NComma || n is NCloseParanthesis);
+
+                  if (nextCommaOrClosingParenthesis == -1)
+                    Error($"Missing ',' or ')' whilst calling {value}.", nodes[0].file, nodes[0].line);
+
+                  if (parameters.Count == 0 && nextCommaOrClosingParenthesis == 0 && nodes[0] is NCloseParanthesis)
+                  {
+                    nodes.RemoveAt(0);
+                    break;
+                  }
+
+                  bool isLastParam = nodes[nextCommaOrClosingParenthesis] is NCloseParanthesis;
+
+                  var parameterNodes = nodes.GetRange(0, nextCommaOrClosingParenthesis);
+                  nodes.RemoveRange(0, nextCommaOrClosingParenthesis + 1);
+
+                  parameters.Add(GetRValue(scope, parameterNodes, ref byteCodeState));
+
+                  if (isLastParam)
+                    break;
+                }
+              }
+
+              CValue returnValue;
+
+              scope.instructions.Add(new CInstruction_CallFunctionPtr(value, parameters, out returnValue, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
+
+              return returnValue;
+            }
+            else
+            {
+              // TODO: '.', '->'
+              throw new NotImplementedException();
+            }
           }
           else
           {
@@ -3733,13 +3974,12 @@ namespace llsc
         else
         {
           var function = scope.GetFunction((nodes[0] as NName).name);
-          var nameNode = nodes[0];
 
           if (function == null)
             Error($"Unknown identifer '{(nodes[0] as NName).name}'.", nameNode.file, nameNode.line);
 
           if (!(function.returnType is VoidCType))
-            Warn($"lvalue call to {function} will discard the return value.", nameNode.file, nameNode.line);
+            Warn($"lvalue call to {function} will discard the return value of type '{function.returnType}'.", nameNode.file, nameNode.line);
 
           if (nodes.Count == 1 || !(nodes[1] is NOpenParanthesis))
             Error($"Incomplete or invalid reference to function '{(nodes[0] as NName).name}'.", nameNode.file, nameNode.line);
@@ -3795,16 +4035,69 @@ namespace llsc
 
     private static CValue GetRValue(Scope scope, List<Node> nodes, ref ByteCodeState byteCodeState)
     {
+      // TODO: Optional expected type.
+
       if (nodes[0] is NName)
       {
         var value = scope.GetVariable((nodes[0] as NName).name);
+        var nameNode = nodes[0];
 
         if (value != null)
         {
           if (nodes.Count > 1)
           {
-            // TODO: '.', '->', '('
-            throw new NotImplementedException();
+            // Call to extern_func or func.
+            if ((value.type is ExternFuncCType || value.type is FuncCType) && nodes[1] is NOpenParanthesis)
+            {
+              if ((value.type as ExternFuncCType).returnType is VoidCType)
+                Error($"Invalid return type '{(value.type as ExternFuncCType).returnType}' of rvalue function ptr call to '{value}'.", nameNode.file, nameNode.line);
+
+              nodes.RemoveRange(0, 2);
+
+              List<CValue> parameters = new List<CValue>();
+
+              while (true)
+              {
+                if (nodes.Count == 0)
+                {
+                  Error($"Unexpected end of function call to '{value}'.", nameNode.file, nameNode.line);
+                }
+                else
+                {
+                  int nextCommaOrClosingParenthesis = nodes.FindNextSelfScope(n => n is NComma || n is NCloseParanthesis);
+
+                  if (nextCommaOrClosingParenthesis == -1)
+                    Error($"Missing ',' or ')' whilst calling {value}.", nodes[0].file, nodes[0].line);
+
+                  if (parameters.Count == 0 && nextCommaOrClosingParenthesis == 0 && nodes[0] is NCloseParanthesis)
+                  {
+                    nodes.RemoveAt(0);
+                    break;
+                  }
+
+                  bool isLastParam = nodes[nextCommaOrClosingParenthesis] is NCloseParanthesis;
+
+                  var parameterNodes = nodes.GetRange(0, nextCommaOrClosingParenthesis);
+                  nodes.RemoveRange(0, nextCommaOrClosingParenthesis + 1);
+
+                  parameters.Add(GetRValue(scope, parameterNodes, ref byteCodeState));
+
+                  if (isLastParam)
+                    break;
+                }
+              }
+
+              CValue returnValue;
+
+              scope.instructions.Add(new CInstruction_CallFunctionPtr(value, parameters, out returnValue, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
+
+              return returnValue;
+            }
+            else
+            {
+              // TODO: '.', '->'
+              throw new NotImplementedException();
+            }
           }
           else
           {
@@ -3814,7 +4107,6 @@ namespace llsc
         else
         {
           var function = scope.GetFunction((nodes[0] as NName).name);
-          var nameNode = nodes[0];
 
           if (function == null)
             Error($"Unknown identifer '{(nodes[0] as NName).name}'.", nameNode.file, nameNode.line);
@@ -3874,6 +4166,10 @@ namespace llsc
 
           return returnValue;
         }
+      }
+      else if (nodes[0] is NIntegerValue && nodes.Count == 1)
+      {
+        return new CConstValue(nodes[0] as NIntegerValue, BuiltInCType.Types["u64"]);
       }
       else if (nodes.NextIs(typeof(NCastKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NOpenParanthesis)) && (nodes[1] as NOperator).operatorType == "<" && (nodes[3] as NOperator).operatorType == ">" && nodes.Count > 5 && nodes.Last() is NCloseParanthesis)
       {

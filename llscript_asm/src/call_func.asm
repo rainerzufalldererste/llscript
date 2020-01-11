@@ -51,6 +51,9 @@ __lls__call_func:
 ; Reserve Stack Space.
 sub rsp, 8
 
+; Move to the beginning of the stack.
+sub rax, 8
+
 ; Move script stack ptr to rax.
 mov rax, rcx
 
@@ -139,6 +142,8 @@ push [rax]
 sub rax, 8
 jmp remaining_params
 
+
+; TODO: Do we need to pop the values from the stack as well?
 
 
 do_call:

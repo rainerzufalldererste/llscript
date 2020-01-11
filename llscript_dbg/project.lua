@@ -6,6 +6,7 @@ project(ProjectName)
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
   defines { "_CRT_SECURE_NO_WARNINGS", "LLS_DEBUG_MODE" }
+  dependson { llscript_asm, llscript_host }
   
   objdir "intermediate/obj"
 
