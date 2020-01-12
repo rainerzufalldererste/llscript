@@ -1617,7 +1617,9 @@ namespace llsc
 
       foreach (var instruction in instructions)
       {
-        instruction.AfterCodeGen();
+        if (Compiler.OptimizationLevel > 0)
+          instruction.AfterCodeGen();
+
         instruction.position = position;
         position += instruction.bytecodeSize;
       }
@@ -2760,18 +2762,12 @@ namespace llsc
 
         if (function.returnType is VoidCType)
         {
-          if (returnValueRegister == -1)
-            returnValueRegister = chosenIntRegister = byteCodeState.GetTriviallyFreeIntegerRegister();
-
-          if (returnValueRegister == -1)
-            returnValueRegister = chosenFloatRegister = byteCodeState.GetTriviallyFreeFloatRegister();
-
-          if (returnValueRegister == -1)
-            returnValueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+          returnValueRegister = chosenIntRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
         }
         else if (function.returnType is BuiltInCType && (function.returnType as BuiltInCType).IsFloat())
         {
-          returnValueRegister = chosenFloatRegister = byteCodeState.GetFreeFloatRegister(stackSize);
+          chosenFloatRegister = byteCodeState.GetFreeFloatRegister(stackSize);
+          returnValueRegister = chosenIntRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
           byteCodeState.registers[chosenFloatRegister] = null;
         }
         else if (chosenIntRegister != -1)
@@ -2816,41 +2812,44 @@ namespace llsc
         // Type of return value.
         {
           if (function.returnType is BuiltInCType && (function.returnType as BuiltInCType).IsFloat())
-            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)1)));
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(chosenIntRegister, BitConverter.GetBytes((ulong)1)));
           else
-            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)0)));
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(chosenIntRegister, BitConverter.GetBytes((ulong)0)));
 
-          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)chosenIntRegister));
           pushedBytes += 8;
         }
 
         // Signal Last Argument.
         {
-          byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)0)));
+          byteCodeState.instructions.Add(new LLI_MovImmToRegister(chosenIntRegister, BitConverter.GetBytes((ulong)0)));
 
           byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
           pushedBytes += 8;
         }
 
+        byteCodeState.instructions.Add(new LLI_StackDecrementImm(pushedBytes));
+        
         // Push Arguments to the Stack.
         for (int i = function.parameters.Length - 1; i >= 0; i--)
         {
-          byteCodeState.instructions.Add(new LLI_StackDecrementImm(pushedBytes));
+          bool isFloat = function.parameters[i] is BuiltInCType && (function.parameters[i] as BuiltInCType).IsFloat();
 
-          Position targetPosition = Position.Register(returnValueRegister);
+          Position targetPosition = Position.Register(isFloat ? chosenFloatRegister : chosenIntRegister);
           byteCodeState.MoveValueToPositionWithCast(this.arguments[i], targetPosition, function.parameters[i], stackSize, false);
-          byteCodeState.instructions.Add(new LLI_StackIncrementImm(pushedBytes));
-          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(targetPosition.registerIndex, new SharedValue<long>(0), pushedBytes));
           pushedBytes += 8;
 
           if (function.parameters[i] is BuiltInCType && (function.parameters[i] as BuiltInCType).IsFloat())
-            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((long)-1)));
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(chosenIntRegister, BitConverter.GetBytes((long)-1)));
           else
-            byteCodeState.instructions.Add(new LLI_MovImmToRegister(returnValueRegister, BitConverter.GetBytes((ulong)1)));
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(chosenIntRegister, BitConverter.GetBytes((ulong)1)));
 
-          byteCodeState.instructions.Add(new LLI_PushRegister((byte)returnValueRegister));
+          byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(chosenIntRegister, new SharedValue<long>(0), pushedBytes));
           pushedBytes += 8;
         }
+
+        byteCodeState.instructions.Add(new LLI_StackIncrementImm(pushedBytes));
 
         // Perform Call.
         byteCodeState.instructions.Add(new LLI_CallExternFunction_ResultToRegister((byte)returnValueRegister));
@@ -3009,6 +3008,8 @@ namespace llsc
     static bool WarningsAsErrors = false;
     static bool ShowWarnings = true;
 
+    public static int OptimizationLevel { get; private set; } = 1;
+
     public static readonly int IntegerRegisters = 8;
     public static readonly int FloatRegisters = 8;
 
@@ -3065,6 +3066,10 @@ namespace llsc
 
             case "-FatalWarnings":
               WarningsAsErrors = true;
+              break;
+
+            case "-O0":
+              OptimizationLevel = 0;
               break;
 
             default:
