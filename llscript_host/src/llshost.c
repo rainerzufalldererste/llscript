@@ -58,13 +58,14 @@ __forceinline LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
 
   if (possiblePointer)
   {
-    const char *pData = (const char *)param;
+    const uint64_t value = *(const uint64_t *)param;
+    const char *pData = (const char *)&value;
     fputs("\t\t// \t", stdout);
 
     for (size_t i = 0; i < 8; i++)
       printf("%02" PRIx8 " ", pData[i]);
 
-    fputs(" \t", stdout);
+    fputs("... \t", stdout);
 
     for (size_t i = 0; i < 8; i++)
       if (pData[i] > 0x20)
@@ -72,7 +73,7 @@ __forceinline LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
       else
         fputs("?", stdout);
 
-    puts("");
+    puts(" ...");
   }
 }
 #else
@@ -568,7 +569,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         *(uint64_t *)pStack = *(uint64_t *)&fregister[source_register - 8];
         pStack += 8;
       }
-      ASSERT_NO_ELSE
+      ASSERT_NO_ELSE;
 
         break;
     }
@@ -593,7 +594,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         pStack -= 8;
         fregister[target_register - 8] = *(const double *)pStack;
       }
-      ASSERT_NO_ELSE
+      ASSERT_NO_ELSE;
 
         break;
     }
@@ -697,6 +698,75 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       IF_LAST_OPT(target_register < 8)
         iregister[target_register] += imm;
       ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_CMP_NEQ_IMM_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_CMP_NEQ_IMM_REGISTER);
+
+      const lls_code_t value_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(value_register);
+      LOG_DELIMITER();
+
+      if (value_register < 8)
+      {
+        const uint64_t value = *(const uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
+        LOG_U64(value);
+
+        cmp = iregister[value_register] == value;
+      }
+      else IF_LAST_OPT(value_register < 16)
+      {
+        const double value = *(const double *)pCodePtr;
+        pCodePtr += sizeof(double);
+        LOG_F64(value);
+
+        cmp = iregister[value_register] == value;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_INFO_START();
+      LOG_U8(cmp);
+      LOG_INFO_END();
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_JUMP_CMP_TRUE_RELATIVE_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_JUMP_CMP_TRUE_RELATIVE_IMM);
+
+      const int64_t value = *(const int64_t *)pCodePtr;
+      pCodePtr += sizeof(int64_t);
+      LOG_I64(value);
+      LOG_INFO_START();
+      LOG_U8(cmp);
+      LOG_INFO_END();
+      LOG_END();
+
+      if (cmp)
+        pCodePtr += value;
+
+      break;
+    }
+
+    case LLS_OP_JMP_RELATIVE_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_JMP_RELATIVE_IMM);
+
+      const int64_t value = *(const int64_t *)pCodePtr;
+      pCodePtr += sizeof(int64_t);
+      LOG_I64(value);
+      LOG_END();
+
+      pCodePtr += value;
 
       break;
     }
