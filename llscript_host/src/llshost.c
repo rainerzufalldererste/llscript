@@ -14,9 +14,11 @@
 #ifndef LLS_PERF_MODE
 #define ASSERT_NO_ELSE else { __debugbreak(); return; }
 #define IF_LAST_OPT(...) if (__VA_ARGS__)
+#define ASSERT(x) do { if (!(x)) { __debugbreak(); return; } } while (0)
 #else
 #define ASSERT_NO_ELSE
 #define IF_LAST_OPT(...)
+#define ASSERT(x)
 #endif
 
 #ifdef LLS_DEBUG_MODE
@@ -679,9 +681,9 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
-    case LLS_OP_UADD_IMM:
+    case LLS_OP_ADD_IMM:
     {
-      LOG_INSTRUCTION_NAME(LLS_OP_UADD_IMM);
+      LOG_INSTRUCTION_NAME(LLS_OP_ADD_IMM);
 
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
@@ -689,14 +691,102 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_U8(target_register);
       LOG_DELIMITER();
 
-      const uint64_t imm = *(uint64_t *)pCodePtr;
-      pCodePtr += sizeof(uint64_t);
+      if (target_register < 8)
+      {
+        const uint64_t imm = *(uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
 
-      LOG_U64(imm);
+        LOG_U64(imm);
+
+        iregister[target_register] += imm;
+      }
+      else IF_LAST_OPT(target_register < 16)
+      {
+        const double imm = *(double *)pCodePtr;
+        pCodePtr += sizeof(double);
+
+        LOG_F64(imm);
+
+        fregister[target_register - 8] += imm;
+      }
+      ASSERT_NO_ELSE;
+
       LOG_END();
 
-      IF_LAST_OPT(target_register < 8)
-        iregister[target_register] += imm;
+      break;
+    }
+
+    case LLS_OP_ADD_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_ADD_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(operand_register);
+      LOG_END();
+
+      if (source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] += iregister[operand_register];
+      }
+      else IF_LAST_OPT(source_register < 16)
+      {
+        ASSERT(operand_register >= 8 && operand_register < 16);
+        fregister[source_register - 8] += fregister[operand_register - 8];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_NEGATE_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_NEGATE_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
+
+      if (source_register < 8)
+        iregister[source_register] = -iregister[source_register];
+      else IF_LAST_OPT(source_register < 16)
+        fregister[source_register - 8] = -fregister[source_register - 8];
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_EQ_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_EQ_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(operand_register);
+      LOG_END();
+
+      if (source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] = (iregister[source_register] == iregister[operand_register]);
+      }
       ASSERT_NO_ELSE;
 
       break;
@@ -726,7 +816,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         pCodePtr += sizeof(double);
         LOG_F64(value);
 
-        cmp = iregister[value_register] == value;
+        cmp = fregister[value_register - 8] == value;
       }
       ASSERT_NO_ELSE;
 

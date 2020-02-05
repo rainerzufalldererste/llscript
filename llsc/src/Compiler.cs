@@ -32,25 +32,16 @@ namespace llsc
     LLS_OP_STACK_DEC_IMM,
     LLS_OP_STACK_DEC_REGISTER,
 
-    LLS_OP_UADD_IMM,
-    LLS_OP_UADD_REGISTER,
-    LLS_OP_USUB_IMM,
-    LLS_OP_USUB_REGISTER,
-    LLS_OP_UMUL_IMM,
-    LLS_OP_UMUL_REGISTER,
-    LLS_OP_UDIV_IMM,
-    LLS_OP_UDIV_REGISTER,
-    LLS_OP_UMOD_IMM,
-    LLS_OP_UMOD_REGISTER,
-
     LLS_OP_ADD_IMM,
     LLS_OP_ADD_REGISTER,
-    LLS_OP_SUB_IMM,
-    LLS_OP_SUB_REGISTER,
-    LLS_OP_MUL_IMM,
-    LLS_OP_MUL_REGISTER,
-    LLS_OP_DIV_IMM,
-    LLS_OP_DIV_REGISTER,
+    LLS_OP_MULI_IMM,
+    LLS_OP_MULI_REGISTER,
+    LLS_OP_DIVI_IMM,
+    LLS_OP_DIVI_REGISTER,
+    LLS_OP_MULU_IMM,
+    LLS_OP_MULU_REGISTER,
+    LLS_OP_DIVU_IMM,
+    LLS_OP_DIVU_REGISTER,
     LLS_OP_MOD_IMM,
     LLS_OP_MOD_REGISTER,
 
@@ -64,15 +55,14 @@ namespace llsc
     LLS_OP_LOGICAL_AND_REGISTER,
     LLS_OP_LOGICAL_OR_REGISTER,
 
-    LLS_OP_INV,
-    LLS_OP_NOT,
+    LLS_OP_INV_REGISTER,
+    LLS_OP_NOT_REGISTER,
 
-    LLS_OP_INEGATE,
-    LLS_OP_FNEGATE,
+    LLS_OP_EQ_REGISTER,
+    LLS_OP_LT_REGISTER,
+    LLS_OP_GT_REGISTER,
 
-    LLS_OP_CMP_EQ_IMM,
-    LLS_OP_CMP_GT_IMM,
-    LLS_OP_CMP_LT_IMM,
+    LLS_OP_NEGATE_REGISTER,
 
     LLS_OP_CMP_NEQ_IMM_REGISTER,
 
@@ -288,6 +278,13 @@ namespace llsc
     public NElseKeyword(string file, int line) : base(file, line) { }
 
     public override string ToString() => "'else'";
+  }
+
+  public class NWhileKeyword : Node
+  {
+    public NWhileKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'while'";
   }
 
   public class NStringValue : Node
@@ -868,6 +865,8 @@ namespace llsc
   {
     public CType type { get; protected set; }
 
+    public string description = "";
+
     public string file { get; protected set; }
 
     public int line { get; protected set; }
@@ -893,7 +892,7 @@ namespace llsc
       this.isInitialized = isInitialized;
     }
 
-    public override string ToString() => "unnamed value [" + (isConst ? "const " : "") + type + "]";
+    public override string ToString() => "unnamed value [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
 
     public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -907,6 +906,7 @@ namespace llsc
       ret.remainingReferences = remainingReferences;
       ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+      ret.description = description;
 
       scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
 
@@ -984,7 +984,7 @@ namespace llsc
       ivalue = value.int_value;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")";
+    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -998,6 +998,7 @@ namespace llsc
       ret.remainingReferences = remainingReferences;
       ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+      ret.description = description;
 
       ret.uvalue = uvalue;
       ret.ivalue = ivalue;
@@ -1029,7 +1030,7 @@ namespace llsc
       this.value = value.value;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + value.ToString() + ")";
+    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -1040,6 +1041,7 @@ namespace llsc
       ret.remainingReferences = remainingReferences;
       ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+      ret.description = description;
 
       ret.value = value;
 
@@ -1068,7 +1070,7 @@ namespace llsc
       this.name = name;
     }
 
-    public override string ToString() => (isConst ? "const " : "") + type + " " + name;
+    public override string ToString() => (isConst ? "const " : "") + type + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -1082,6 +1084,7 @@ namespace llsc
       ret.remainingReferences = remainingReferences;
       ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
+      ret.description = description;
 
       ret.name = name;
       ret.hasStackOffset = false;
@@ -1092,6 +1095,19 @@ namespace llsc
 
       return ret;
     }
+  }
+
+  public class CGlobalValueReference : CValue
+  {
+    public bool isModifiedLocalCopy = false;
+
+
+    public CGlobalValueReference(CType type, string file, int line, bool isConst) : base(file, line, type, isConst, true)
+    {
+
+    }
+
+    public override string ToString() => "unnamed global (?) value [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
   }
 
   public class FileContents
@@ -1210,7 +1226,7 @@ namespace llsc
       return false;
     }
 
-    public static int FindNextSelfScope(this List<Node> nodes, int start, Func<Node, bool> check)
+    public static int FindNextSameScope(this List<Node> nodes, int start, Func<Node, bool> check)
     {
       int bracketLevel = 0;
       int parantesisLevel = 0;
@@ -1238,7 +1254,7 @@ namespace llsc
       return -1;
     }
 
-    public static int FindNextSameScope(this List<Node> nodes, Func<Node, bool> check) => FindNextSelfScope(nodes, 0, check);
+    public static int FindNextSameScope(this List<Node> nodes, Func<Node, bool> check) => FindNextSameScope(nodes, 0, check);
   }
 
   public struct Position
@@ -1475,15 +1491,40 @@ namespace llsc
     public List<LLInstruction> instructions = new List<LLInstruction>();
 
     public CValue[] registers = new CValue[Compiler.IntegerRegisters + Compiler.FloatRegisters];
+    public bool[] registerLocked = new bool[Compiler.IntegerRegisters + Compiler.FloatRegisters];
+
+    public class RegisterLock
+    {
+      int register;
+      ByteCodeState byteCodeState;
+
+      public RegisterLock(int register, ByteCodeState byteCodeState)
+      {
+        this.register = register;
+        this.byteCodeState = byteCodeState;
+
+        this.byteCodeState.registerLocked[register] = true;
+      }
+
+      ~RegisterLock()
+      {
+        byteCodeState.registerLocked[register] = false;
+      }
+    }
+
+    public RegisterLock LockRegister(int register)
+    {
+      return new RegisterLock(register, this);
+    }
 
     public int GetFreeIntegerRegister(SharedValue<long> stackSize)
     {
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i] == null)
+        if (registers[i] == null && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i].remainingReferences == 0)
+        if (registers[i].remainingReferences == 0 && !registerLocked[i])
           return i;
 
       int oldestIndex = -1;
@@ -1493,6 +1534,9 @@ namespace llsc
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
       {
+        if (registerLocked[i])
+          continue;
+
         if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
@@ -1520,6 +1564,9 @@ namespace llsc
         }
       }
 
+      if (oldestIndex == -1)
+        throw new Exception("Internal Compiler Error: Unable to find index, all indices seem locked.");
+
       FreeUsedRegister(oldestIndex, stackSize);
 
       return oldestIndex;
@@ -1528,11 +1575,11 @@ namespace llsc
     public int GetFreeFloatRegister(SharedValue<long> stackSize)
     {
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] == null)
+        if (registers[i] == null && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i].remainingReferences == 0)
+        if (registers[i].remainingReferences == 0 && !registerLocked[i])
           return i;
 
       int oldestIndex = -1;
@@ -1542,6 +1589,9 @@ namespace llsc
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
       {
+        if (registerLocked[i])
+          continue;
+
         if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
@@ -1569,6 +1619,9 @@ namespace llsc
         }
       }
 
+      if (oldestIndex == -1)
+        throw new Exception("Internal Compiler Error: Unable to find index, all indices seem locked.");
+
       FreeUsedRegister(oldestIndex, stackSize);
 
       return oldestIndex;
@@ -1577,15 +1630,15 @@ namespace llsc
     public int GetTriviallyFreeIntegerRegister()
     {
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i] == null)
+        if (registers[i] == null && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i].remainingReferences == 0)
+        if (registers[i].remainingReferences == 0 && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
             return i;
 
@@ -1595,15 +1648,15 @@ namespace llsc
     public int GetTriviallyFreeFloatRegister()
     {
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] == null)
+        if (registers[i] == null && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i].remainingReferences == 0)
+        if (registers[i].remainingReferences == 0 && !registerLocked[i])
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
             return i;
 
@@ -1783,6 +1836,10 @@ namespace llsc
             sourceValue.remainingReferences++;
         }
       }
+      else if (sourceValue is CConstFloatValue)
+      {
+        throw new NotImplementedException();
+      }
       else
       {
         if (!sourceValue.hasPosition)
@@ -1804,7 +1861,8 @@ namespace llsc
             sourceValue.lastTouchedInstructionCount = instructions.Count;
           }
         }
-        else */if (targetPosition.inRegister)
+        else */
+        if (targetPosition.inRegister)
         {
           if (sourceValue.position.inRegister)
           {
@@ -1861,7 +1919,7 @@ namespace llsc
               while (bytes > 0)
               {
                 var copyBytes = Math.Min(byte.MaxValue, bytes);
-                
+
                 instructions.Add(new LLI_MovStackOffsetToStackOffset_NBytes(stackSize, sourceValue.position.stackOffsetForward + offset, stackSize, targetPosition.stackOffsetForward + offset, (byte)copyBytes));
 
                 bytes -= copyBytes;
@@ -1995,6 +2053,33 @@ namespace llsc
 
         return (byte)registerIndex;
       }
+    }
+
+    internal void MoveValueToHome(CNamedValue value, SharedValue<long> stackSize)
+    {
+      if (!value.hasPosition)
+        throw new Exception("Internal Compiler Error");
+
+      if (value.hasStackOffset && value.hasPosition && !value.position.inRegister && value.position.stackOffsetForward != value.homeStackOffset)
+        throw new Exception("Internal Compiler Error");
+
+      if (!value.position.inRegister)
+        return;
+
+      if (!value.hasStackOffset)
+      {
+        value.hasStackOffset = true;
+        value.homeStackOffset = stackSize.Value;
+        stackSize.Value += value.type.GetSize();
+        value.modifiedSinceLastHome = true;
+      }
+
+      if (!value.modifiedSinceLastHome)
+        return;
+
+      Position position = Position.StackOffset(value.homeStackOffset);
+
+      MoveValueToPosition(value, position, stackSize, false);
     }
   }
   
@@ -2382,11 +2467,11 @@ namespace llsc
     }
   }
 
-  public class LLI_UAddImm : LLInstruction
+  public class LLI_AddImm : LLInstruction
   {
     int register;
     byte[] value;
-    public LLI_UAddImm(int register, byte[] value) : base(1 + 1 + 8)
+    public LLI_AddImm(int register, byte[] value) : base(1 + 1 + 8)
     {
       this.register = register;
       this.value = value;
@@ -2397,9 +2482,27 @@ namespace llsc
 
     public override void AppendBytecode(ref List<byte> byteCode)
     {
-      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_UADD_IMM);
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_ADD_IMM);
       byteCode.Add((byte)register);
       byteCode.AddRange(value);
+    }
+  }
+
+  public class LLI_AddRegister : LLInstruction
+  {
+    int src_dst;
+    int operand;
+    public LLI_AddRegister(int src_dst, int operand) : base(1 + 1 + 1)
+    {
+      this.src_dst = src_dst;
+      this.operand = operand;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_ADD_REGISTER);
+      byteCode.Add((byte)src_dst);
+      byteCode.Add((byte)operand);
     }
   }
 
@@ -2422,6 +2525,40 @@ namespace llsc
       byteCode.Add((byte)ByteCodeInstructions.LLS_OP_AND_IMM);
       byteCode.Add((byte)register);
       byteCode.AddRange(value);
+    }
+  }
+
+  public class LLI_Negate : LLInstruction
+  {
+    int register;
+
+    public LLI_Negate(int register) : base(1 + 1)
+    {
+      this.register = register;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_NEGATE_REGISTER);
+      byteCode.Add((byte)register);
+    }
+  }
+
+  public class LLI_EqualsRegister : LLInstruction
+  {
+    int src_dst;
+    int operand;
+    public LLI_EqualsRegister(int src_dst, int operand) : base(1 + 1 + 1)
+    {
+      this.src_dst = src_dst;
+      this.operand = operand;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_EQ_REGISTER);
+      byteCode.Add((byte)src_dst);
+      byteCode.Add((byte)operand);
     }
   }
 
@@ -2687,7 +2824,7 @@ namespace llsc
         offset += 8;
 
         if (dataSizeRemaining > 0)
-          byteCodeState.instructions.Add(new LLI_UAddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
+          byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
       }
 
       if (dataSizeRemaining > 0)
@@ -2724,8 +2861,9 @@ namespace llsc
       if (sourceValue == targetValue)
         return;
 
-      if (!sourceValue.hasPosition)
-        throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
+      if (!(sourceValue is CConstIntValue || sourceValue is CConstFloatValue))
+        if (!sourceValue.hasPosition)
+          throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
 
       if (!targetValue.hasPosition)
       {
@@ -3169,6 +3307,286 @@ namespace llsc
 
         byteCodeState.registers[i] = null;
       }
+    }
+  }
+
+  public class CInstruction_AddImm : CInstruction
+  {
+    CValue value;
+    byte[] imm;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+    bool toSelf;
+
+    public CInstruction_AddImm(CValue value, long imm, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
+        throw new Exception("Internal Compiler Error: Should not be float value.");
+
+      this.value = value;
+      this.imm = BitConverter.GetBytes(imm);
+      this.stackSize = stackSize;
+      this.toSelf = toSelf;
+
+      if (toSelf)
+        this.resultingValue = value;
+      else
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public CInstruction_AddImm(CValue value, ulong imm, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
+        throw new Exception("Internal Compiler Error: Should not be float value.");
+
+      this.value = value;
+      this.imm = BitConverter.GetBytes(imm);
+      this.stackSize = stackSize;
+      this.toSelf = toSelf;
+
+      if (toSelf)
+        this.resultingValue = value;
+      else
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public CInstruction_AddImm(CValue value, double imm, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (!(value.type is BuiltInCType) || !(value.type as BuiltInCType).IsFloat())
+        throw new Exception("Internal Compiler Error: Should be float value.");
+
+      this.value = value;
+      this.imm = BitConverter.GetBytes(imm);
+      this.stackSize = stackSize;
+      this.toSelf = toSelf;
+
+      if (toSelf)
+        this.resultingValue = value;
+      else
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!value.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized {value}.", file, line);
+
+      int registerIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
+
+      if (!toSelf && (value is CNamedValue || value is CGlobalValueReference))
+      {
+        if (value is CNamedValue && (value as CNamedValue).modifiedSinceLastHome)
+          byteCodeState.MoveValueToHome(value as CNamedValue, stackSize);
+        else if (value is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+
+      byteCodeState.instructions.Add(new LLI_AddImm(registerIndex, imm));
+
+      if (toSelf)
+      {
+        if (value is CNamedValue)
+          (value as CNamedValue).modifiedSinceLastHome = true;
+        else if (value is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+      else
+      {
+        byteCodeState.registers[registerIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = registerIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Add : CInstruction
+  {
+    CValue lvalue, rvalue;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+    bool toSelf;
+
+    public CInstruction_Add(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) != (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+
+      this.lvalue = lvalue;
+      this.rvalue = rvalue;
+      this.stackSize = stackSize;
+      this.toSelf = toSelf;
+
+      if (toSelf)
+        this.resultingValue = lvalue;
+      else
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"{lvalue} + {rvalue}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
+
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+
+      var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex);
+
+      int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+
+      if (!toSelf && (lvalue is CNamedValue || lvalue is CGlobalValueReference))
+      {
+        if (lvalue is CNamedValue && (lvalue as CNamedValue).modifiedSinceLastHome)
+          byteCodeState.MoveValueToHome(lvalue as CNamedValue, stackSize);
+        else if (lvalue is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+
+      byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+
+      if (toSelf)
+      {
+        if (lvalue is CNamedValue)
+          (lvalue as CNamedValue).modifiedSinceLastHome = true;
+        else if (lvalue is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+      else
+      {
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Subtract : CInstruction
+  {
+    CValue lvalue, rvalue;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+    bool toSelf;
+
+    public CInstruction_Subtract(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) != (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+
+      this.lvalue = lvalue;
+      this.rvalue = rvalue;
+      this.stackSize = stackSize;
+      this.toSelf = toSelf;
+
+      if (toSelf)
+        this.resultingValue = lvalue;
+      else
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"{lvalue} - {rvalue}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
+
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+
+      var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex);
+
+      int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+
+      if (!toSelf && (lvalue is CNamedValue || lvalue is CGlobalValueReference))
+      {
+        if (lvalue is CNamedValue && (lvalue as CNamedValue).modifiedSinceLastHome)
+          byteCodeState.MoveValueToHome(lvalue as CNamedValue, stackSize);
+        else if (lvalue is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+
+      byteCodeState.instructions.Add(new LLI_Negate(rvalueRegisterIndex));
+      byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+
+      if (toSelf)
+      {
+        if (lvalue is CNamedValue)
+          (lvalue as CNamedValue).modifiedSinceLastHome = true;
+        else if (lvalue is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+      else
+      {
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Equals : CInstruction
+  {
+    CValue lvalue, rvalue;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_Equals(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) || (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+
+      this.lvalue = lvalue;
+      this.rvalue = rvalue;
+      this.stackSize = stackSize;
+      
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"{lvalue} == {rvalue}" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
+
+      if (!lvalue.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+
+      var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex);
+
+      int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+
+      if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
+      {
+        if (lvalue is CNamedValue && (lvalue as CNamedValue).modifiedSinceLastHome)
+          byteCodeState.MoveValueToHome(lvalue as CNamedValue, stackSize);
+        else if (lvalue is CGlobalValueReference)
+          throw new NotImplementedException();
+      }
+      
+      byteCodeState.instructions.Add(new LLI_EqualsRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+      
+      byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+      resultingValue.hasPosition = true;
+      resultingValue.position.inRegister = true;
+      resultingValue.position.registerIndex = lvalueRegisterIndex;
     }
   }
 
@@ -3669,6 +4087,10 @@ namespace llsc
 
             case "else":
               file.nodes[i] = new NElseKeyword(node.file, node.line);
+              break;
+
+            case "while":
+              file.nodes[i] = new NWhileKeyword(node.file, node.line);
               break;
 
             case "u64":
@@ -4225,41 +4647,64 @@ namespace llsc
         }
         else
         {
-          // Find first '=' before ';'.
+          // Find first operator before ';'.
           // TODO: Care about scope!
-          int firstEquals = -1;
-          int nextEndLine = -1;
+          int firstOperator = nodes.FindNextSameScope(n => n is NOperator || n is NLineEnd);
 
-          for (int i = 0; i < nodes.Count; i++)
-          {
-            if (firstEquals == -1 && nodes[i] is NOperator && (nodes[i] as NOperator).operatorType == "=")
-            {
-              firstEquals = i;
-            }
-            else if (nodes[i] is NLineEnd)
-            {
-              nextEndLine = i;
-              break;
-            }
-          }
+          if (nodes[firstOperator] is NLineEnd)
+            firstOperator = -1;
 
-          if (nextEndLine == -1 || nextEndLine == firstEquals + 1)
+          int nextEndLine = nodes.FindNextSameScope(firstOperator == -1 ? 0 : firstOperator, n => n is NLineEnd);
+
+          if (nextEndLine == -1)
             Error($"Unexpected {nodes[0]}.", nodes[0].file, nodes[0].line);
-
+          
           // only lvalue.
-          if (firstEquals == -1)
+          if (firstOperator == -1)
           {
             var lnodes = nodes.GetRange(0, nextEndLine);
             nodes.RemoveRange(0, nextEndLine + 1);
 
             GetLValue(scope, lnodes, ref byteCodeState);
           }
-          // lvalue = rvalue;
-          else
+          // `++`, `--`.
+          else if (nextEndLine == firstOperator + 1)
           {
-            var lnodes = nodes.GetRange(0, firstEquals);
-            var equalsNode = nodes[firstEquals];
-            var rnodes = nodes.GetRange(firstEquals + 1, nextEndLine - (firstEquals + 1));
+            var operatorNode = nodes[firstOperator] as NOperator;
+
+            if (!new string[] { "++", "--" }.Contains(operatorNode.operatorType))
+              Error($"Invalid use of operator {operatorNode}.", operatorNode.file, operatorNode.line);
+
+            var lnodes = nodes.GetRange(0, firstOperator);
+            nodes.RemoveRange(0, nextEndLine + 1);
+
+            var lvalue = GetLValue(scope, lnodes, ref byteCodeState, null);
+
+            if (!(lvalue.type is BuiltInCType) && !(lvalue.type is PtrCType || (lvalue.type as PtrCType).pointsTo is VoidCType))
+              Error($"{operatorNode} cannot be applied to lvalue of type {lvalue.type}.", operatorNode.file, operatorNode.line);
+
+            CValue resultingValue;
+
+            if (lvalue.type is PtrCType)
+            {
+              scope.instructions.Add(new CInstruction_AddImm(lvalue, (operatorNode.operatorType == "++" ? 1 : -1) * (lvalue.type as PtrCType).pointsTo.GetSize(), scope.maxRequiredStackSpace, true, out resultingValue, operatorNode.file, operatorNode.line));
+            }
+            else
+            {
+              var type = lvalue.type as BuiltInCType;
+
+              if (!type.IsFloat())
+                scope.instructions.Add(new CInstruction_AddImm(lvalue, operatorNode.operatorType == "++" ? 1 : -1, scope.maxRequiredStackSpace, true, out resultingValue, operatorNode.file, operatorNode.line));
+              else
+                scope.instructions.Add(new CInstruction_AddImm(lvalue, operatorNode.operatorType == "++" ? 1.0 : -1.0, scope.maxRequiredStackSpace, true, out resultingValue, operatorNode.file, operatorNode.line));
+            }
+          }
+          // lvalue = rvalue;
+          else if ((nodes[firstOperator] as NOperator).operatorType == "=")
+          {
+            var lnodes = nodes.GetRange(0, firstOperator);
+            var equalsNode = nodes[firstOperator];
+            var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
             nodes.RemoveRange(0, nextEndLine + 1);
 
             var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
@@ -4272,6 +4717,10 @@ namespace llsc
             scope.instructions.Add(new CInstruction_SetValueTo(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
 
             lvalue.isInitialized = true;
+          }
+          else
+          {
+            throw new NotImplementedException();
           }
         }
       }
@@ -4466,9 +4915,107 @@ namespace llsc
 
     private static CValue GetRValue(Scope scope, List<Node> nodes, ref ByteCodeState byteCodeState)
     {
-      // TODO: Optional expected type.
+      // TODO: Optional expected type?
 
-      if (nodes[0] is NName)
+      // Handle Operator Precedence.
+
+      int nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "=" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator == -1)
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "&&" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator == -1)
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "==", "<=", "!=", ">=" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator == -1)
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "+", "-", "|", "<<", ">>", "~", "!" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator == -1)
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "*", "/", "%", "&", "^" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator == -1)
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && !new string[] { "<", ">" }.Contains((n as NOperator).operatorType));
+
+      if (nextOperator != -1)
+      {
+        var operatorNode = nodes[nextOperator] as NOperator;
+
+        if (nextOperator == 0)
+        {
+          if (!new string[] { "~", "!" }.Contains(operatorNode.operatorType)) // TODO: How will we implement 'negate'?
+            Error($"Unexpected {operatorNode} in rvalue.", operatorNode.file, operatorNode.line);
+
+          throw new NotImplementedException();
+        }
+        else
+        {
+          var lnodes = nodes.GetRange(0, nextOperator);
+          var equalsNode = nodes[nextOperator];
+          var rnodes = nodes.GetRange(nextOperator + 1, nodes.Count - (nextOperator + 1));
+
+          var left = GetRValue(scope, rnodes, ref byteCodeState);
+
+          if (left.type is VoidCType || left.type is ArrayCType)
+            Error($"Type '{left.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+
+          var right = GetRValue(scope, lnodes, ref byteCodeState);
+
+          switch (operatorNode.operatorType)
+          {
+            case "=":
+              {
+                scope.instructions.Add(new CInstruction_SetValueTo(left, right, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+
+                right.isInitialized = true;
+
+                return right;
+              }
+
+            case "+":
+              {
+                CValue resultingValue;
+
+                if (right is CConstIntValue)
+                  scope.instructions.Add(new CInstruction_AddImm(left, (right as CConstIntValue).uvalue, scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line));
+                else if (right is CConstFloatValue)
+                  scope.instructions.Add(new CInstruction_AddImm(left, (right as CConstFloatValue).value, scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line));
+                else
+                  scope.instructions.Add(new CInstruction_Add(left, right, scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            case "-":
+              {
+                CValue resultingValue;
+
+                if (right is CConstIntValue)
+                  unchecked { scope.instructions.Add(new CInstruction_AddImm(left, -(long)((right as CConstIntValue).uvalue), scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line)); }
+                else if (right is CConstFloatValue)
+                  scope.instructions.Add(new CInstruction_AddImm(left, -(right as CConstFloatValue).value, scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line));
+                else
+                  scope.instructions.Add(new CInstruction_Subtract(left, right, scope.maxRequiredStackSpace, false, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            case "==":
+              {
+                CValue resultingValue;
+                
+                scope.instructions.Add(new CInstruction_Equals(left, right, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            default:
+              {
+                throw new NotImplementedException();
+              }
+          }
+        }
+      }
+      else if (nodes[0] is NName)
       {
         var value = scope.GetVariable((nodes[0] as NName).name);
         var nameNode = nodes[0];
@@ -4619,6 +5166,20 @@ namespace llsc
           return rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState);
 
         return null; // Unreachable.
+      }
+      else if (nodes[0] is NOpenParanthesis && nodes[nodes.Count - 1] is NCloseParanthesis)
+      {
+        // is this a pair of parantheses?
+        int parantesisLevel = 0;
+
+        foreach (var node in nodes)
+          if (node is NOpenParanthesis)
+            parantesisLevel++;
+          else if (node is NCloseParanthesis)
+            if (--parantesisLevel == 0 && !object.ReferenceEquals(node, nodes[nodes.Count - 1]))
+              Error($"Unexpected {node}.", node.file, node.line);
+
+        return GetRValue(scope, nodes.GetRange(1, nodes.Count - 1), ref byteCodeState);
       }
       else
       {
