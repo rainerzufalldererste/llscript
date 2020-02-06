@@ -43,7 +43,26 @@
 #define LOG_INFO_END() do { if (!silent) fputs(")", stdout); } while (0)
 #define LOG_END() do { if (!silent) puts(""); } while (0)
 
-__forceinline LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
+__forceinline void LOG_U64_AS_STRING(uint64_t value)
+{
+  const char *pData = (const char *)&value;
+
+  for (size_t i = 0; i < 8; i++)
+    if (pData[i] > 0x20)
+      printf("%c", pData[i]);
+    else
+      fputs("?", stdout);
+}
+
+__forceinline void LOG_U64_AS_BYTES(uint64_t value)
+{
+  const char *pData = (const char *)&value;
+
+  for (size_t i = 0; i < 8; i++)
+    printf("%02" PRIX8 " ", pData[i]);
+}
+
+__forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
 {
   bool possiblePointer = false;
 
@@ -52,28 +71,21 @@ __forceinline LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
     puts("\t\t// \tCould be stack pointer:");
     possiblePointer = true;
   }
-  else if (param > 0xFF0000 && _CrtIsValidHeapPointer((const void *)param))
+  else if (param > 0x00007FF000000000)
   {
-    puts("\t\t// \tCould be heap pointer:");
-    possiblePointer = true;
+    puts("\t\t// \tCould be heap pointer.");
   }
 
   if (possiblePointer)
   {
     const uint64_t value = *(const uint64_t *)param;
-    const char *pData = (const char *)&value;
     fputs("\t\t// \t", stdout);
 
-    for (size_t i = 0; i < 8; i++)
-      printf("%02" PRIx8 " ", pData[i]);
+    LOG_U64_AS_BYTES(value);
 
     fputs("... \t", stdout);
 
-    for (size_t i = 0; i < 8; i++)
-      if (pData[i] > 0x20)
-        printf("%c", pData[i]);
-      else
-        fputs("?", stdout);
+    LOG_U64_AS_STRING(value);
 
     puts(" ...");
   }
@@ -113,16 +125,23 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
   bool silent = false;
   bool stepInstructions = true;
   bool stepOut = false;
+  uint64_t breakpoint = (uint64_t)-1;
 
   memset(iregister, 0, sizeof(iregister));
   memset(fregister, 0, sizeof(fregister));
 
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'r' for registers\n\t'p' for stack bytes.\n\t's' toggle silent.\n\t'x' to quit.\n\n");
+  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'x' to quit.\n\n");
 #endif
 
   while (1)
   {
 #ifdef LLS_DEBUG_MODE
+    if (pCodePtr - pState->pCode == breakpoint)
+    {
+      printf("\n\tBreakpoint Hit (0x%" PRIX64 ")!\n\n", breakpoint);
+      stepInstructions = true;
+    }
+
     if (stepInstructions)
     {
       while (1)
@@ -144,10 +163,21 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
           stepInstructions = false;
           goto continue_execution;
 
+        case 'b':
+          fputs("Set breakpoint to: 0x", stdout);
+          scanf("%" PRIx64 "", &breakpoint);
+          printf("\nBreakpoint set at 0x%" PRIx64 ".\n", breakpoint);
+          break;
+
         case 'r':
           puts("Registers:");
           for (size_t i = 0; i < 8; i++)
-            printf("\t% 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
+          {
+            printf("\t% 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ") \t", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
+            LOG_U64_AS_STRING(iregister[i]);
+            puts("");
+            LOG_INSPECT_INTEGER(iregister[i], pState);
+          }
 
           for (size_t i = 0; i < 8; i++)
             printf("\t% 3" PRIu64 ": %d\n", i + 8, fregister[i]);
@@ -201,6 +231,141 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
           puts("\n");
 
           break;
+        }
+
+        case 'y':
+        {
+          size_t offset;
+          fputs("Start Offset: ", stdout);
+          scanf("%" PRIi64 "", &offset);
+
+          size_t size;
+          fputs("\nSize: ", stdout);
+          scanf("%" PRIi64 "", &size);
+
+          puts("");
+
+          uint8_t *pStackInspect = pStack - size;
+
+          if (pStackInspect < pState->pStack)
+            pStackInspect = pState->pStack;
+
+          for (size_t i = 0; i < size + offset; i += 8)
+          {
+            printf("\n %02" PRIi64 ": ", -(int64_t)(pStack - (pStackInspect + i)));
+
+            for (size_t j = 0; j < 8; j++)
+              printf("%02" PRIX8 " ", pStackInspect[i + j]);
+
+            fputs("\t", stdout);
+
+            for (size_t j = 0; j < 8; j++)
+            {
+              const uint8_t value = pStackInspect[i + j];
+
+              if (value >= 0x20)
+                printf("%c", (char)value);
+              else
+                fputs("?", stdout);
+            }
+          }
+
+          puts("\n");
+
+          break;
+        }
+
+        case 'i':
+        {
+          fputs("Start Offset: ", stdout);
+
+          int64_t offset;
+          scanf("%" PRIi64 "", &offset);
+
+          uint8_t *pValue = &pStack[-offset];
+          uint64_t ivalue = *(uint64_t *)pValue;
+
+          printf("\nValue at Stack Offset %" PRIi64 ":\n", offset);
+          printf("\t%" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ") \t", ivalue, *(int64_t *)&ivalue, ivalue);
+          LOG_U64_AS_BYTES(ivalue);
+          fputs("\t ", stdout);
+          LOG_U64_AS_STRING(ivalue);
+          puts("");
+          LOG_INSPECT_INTEGER(ivalue, pState);
+          printf("\t%f / %f\n\n", *(double *)pValue, *(float *)pValue);
+
+          break;
+        }
+
+        case 'm':
+        {
+          puts("[r]egister, [c]mp or [s]tack byte?");
+          
+          switch (_getch())
+          {
+          case 'r':
+          {
+            puts("Register Index:");
+            int64_t registerIndex;
+            scanf("%" PRIi64 "", &registerIndex);
+
+            if (registerIndex < 8)
+            {
+              puts("\nValue: (64 bit uppercase hex integer)");
+
+              uint64_t value;
+              scanf("%" PRIX64 "", &value);
+
+              iregister[registerIndex] = value;
+
+              puts("\nSuccess!");
+            }
+            else if (registerIndex < 16)
+            {
+              puts("\nValue: (double)");
+
+              double value;
+              scanf("%f", &value);
+
+              fregister[registerIndex - 8] = value;
+
+              puts("\nSuccess!");
+            }
+            else
+            {
+              puts("Invalid Register Index.");
+            }
+          }
+
+          case 's':
+          {
+            puts("\nStack Offset:");
+            int64_t stackOffset;
+            scanf("%" PRIi64 "", &stackOffset);
+
+            puts("\nValue: (byte)");
+            uint8_t value;
+            scanf("%" PRIu8 "", &value);
+
+            pStack[-stackOffset] = value;
+
+            puts("\nSuccess!");
+          }
+
+          case 'c':
+          {
+            puts("\nValue: (byte)");
+            uint8_t value;
+            scanf("%" PRIu8 "", &value);
+
+            cmp = value;
+
+            puts("\nSuccess!");
+          }
+
+          default:
+            puts("\nInvalid Option.");
+          }
         }
 
         case 's':
@@ -376,13 +541,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     {
       LOG_INSTRUCTION_NAME(LLS_OP_MOV_STACK_STACK);
 
-      uint8_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
+      uint64_t *pTargetStackPtr = pStack - *(int64_t *)pCodePtr;
       LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
 
       LOG_DELIMITER();
 
-      const uint8_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
+      const uint64_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
       LOG_I64(*(int64_t *)pCodePtr);
       pCodePtr += 8;
 
@@ -573,7 +738,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       }
       ASSERT_NO_ELSE;
 
-        break;
+      break;
     }
 
     case LLS_OP_POP_REGISTER:
@@ -766,6 +931,23 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_NOT_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_NOT_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_U8(source_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+        iregister[source_register] = !iregister[source_register];
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_EQ_REGISTER:
     {
       LOG_INSTRUCTION_NAME(LLS_OP_EQ_REGISTER);
@@ -782,7 +964,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_U8(operand_register);
       LOG_END();
 
-      if (source_register < 8)
+      IF_LAST_OPT(source_register < 8)
       {
         ASSERT(operand_register < 8);
         iregister[source_register] = (iregister[source_register] == iregister[operand_register]);
@@ -894,7 +1076,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             const uint64_t param = *pFunctionCallParams;
             pFunctionCallParams--;
 
-            printf("\t\t// - Integer: %" PRIu64 " / %" PRIi64 " (0x%" PRIx64 ")\n", param, (int64_t)param, param);
+            printf("\t\t// - Integer: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", param, (int64_t)param, param);
 
             LOG_INSPECT_INTEGER(param, pState);
           }
@@ -903,7 +1085,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             const double param = *(const double *)pFunctionCallParams;
             pFunctionCallParams--;
 
-            printf("\t\t// - Float: %f (0x%" PRIx64 ")\n", param, *(const uint64_t *)&param);
+            printf("\t\t// - Float: %f (0x%" PRIX64 ")\n", param, *(const uint64_t *)&param);
           }
         }
 
@@ -920,7 +1102,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         const uint64_t functionAddress = *pFunctionCallParams;
         pFunctionCallParams--;
 
-        printf("\t\t// Function Address: 0x%" PRIx64 ".\n", functionAddress);
+        printf("\t\t// Function Address: 0x%" PRIX64 ".\n", functionAddress);
       }
 #endif
 
@@ -930,7 +1112,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       {
         iregister[target_register] = result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIx64 ")\n", result, (int64_t)result, result);
+        printf("\t\t// Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", result, (int64_t)result, result);
 
         LOG_INSPECT_INTEGER(result, pState);
 #endif
@@ -939,7 +1121,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       {
         fregister[target_register - 8] = *(double *)&result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %f (0x%" PRIx64 ")\n", *(double *)result, result);
+        printf("\t\t// Return Value: %f (0x%" PRIX64 ")\n", *(double *)result, result);
 #endif
       }
       ASSERT_NO_ELSE;
