@@ -2200,7 +2200,7 @@ namespace llsc
         {
           if (position.inRegister)
           {
-            instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, position.stackOffsetForward, position.registerIndex));
+            instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, position.registerIndex));
 
             if (size != 8)
               instructions.Add(new LLI_AndImm(position.registerIndex, BitConverter.GetBytes(((ulong)1 << (int)(size * 8)) - 1)));
@@ -2429,7 +2429,7 @@ namespace llsc
       byteCode.AddRange(BitConverter.GetBytes(value.Value - offset.Value));
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_LEA_STACK_TO_REGISTER} {register}, {value.Value - offset.Value}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_LEA_STACK_TO_REGISTER} r:{register}, {value.Value - offset.Value}";
   }
 
   public class LLI_MovRegisterToRegister : LLInstruction
@@ -2455,7 +2455,7 @@ namespace llsc
       byteCode.Add((byte)sourceRegister);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_REGISTER} {targetRegister}, {sourceRegister}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_REGISTER} r:{targetRegister}, r:{sourceRegister}";
   }
 
   public class LLI_PushRegister : LLInstruction
@@ -2473,7 +2473,7 @@ namespace llsc
       byteCode.Add(register);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_PUSH_REGISTER} {register}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_PUSH_REGISTER} r:{register}";
   }
 
   public class LLI_PopRegister : LLInstruction
@@ -2491,7 +2491,7 @@ namespace llsc
       byteCode.Add(register);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_POP_REGISTER} {register}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_POP_REGISTER} r:{register}";
   }
 
   public class LLI_MovRegisterToStackOffset : LLInstruction
@@ -2514,7 +2514,7 @@ namespace llsc
       byteCode.Add((byte)register);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK} {stackSize.Value - offset}, {register}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK} {stackSize.Value - offset}, r:{register}";
   }
 
   public class LLI_MovRegisterToStackOffset_NBytes : LLInstruction
@@ -2540,7 +2540,7 @@ namespace llsc
       byteCode.Add((byte)bytes);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK_N_BYTES} {stackSize.Value - offset}, {register}, {bytes}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER_STACK_N_BYTES} {stackSize.Value - offset}, r:{register}, {bytes}";
   }
 
   public class LLI_MovStackOffsetToRegister : LLInstruction
@@ -2563,7 +2563,7 @@ namespace llsc
       byteCode.AddRange(BitConverter.GetBytes(stackSize.Value - offset));
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_STACK_REGISTER} {register}, {stackSize.Value - offset}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_STACK_REGISTER} r:{register}, {stackSize.Value - offset}";
   }
 
   public class LLI_MovStackOffsetToStackOffset : LLInstruction
@@ -2642,7 +2642,7 @@ namespace llsc
       byteCode.Add((byte)sourceValueRegister);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER} {targetPtrRegister}, {sourceValueRegister}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER} r:{targetPtrRegister}, r:{sourceValueRegister}";
   }
 
   public class LLI_MovPtrInRegisterFromRegister_NBytes : LLInstruction
@@ -2664,7 +2664,7 @@ namespace llsc
       byteCode.Add((byte)bytes);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES} {targetPtrRegister}, {sourceValueRegister}, {bytes}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_REGISTER__PTR_IN_REGISTER_N_BYTES} r:{targetPtrRegister}, r:{sourceValueRegister}, {bytes}";
   }
 
   public class LLI_MovImmToRegister : LLInstruction
@@ -2688,7 +2688,7 @@ namespace llsc
       byteCode.AddRange(value);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_IMM_REGISTER} {register}, {value.ElementsToString("X2")}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_IMM_REGISTER} r:{register}, {value.ElementsToString("X2")}";
   }
 
   public class LLI_AddImm : LLInstruction
@@ -2711,7 +2711,7 @@ namespace llsc
       byteCode.AddRange(value);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_IMM} {register}, {value.ElementsToString("X2")}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_IMM} r:{register}, {value.ElementsToString("X2")}";
   }
 
   public class LLI_AddRegister : LLInstruction
@@ -2731,7 +2731,7 @@ namespace llsc
       byteCode.Add((byte)operand);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_REGISTER} {src_dst}, {operand}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_REGISTER} r:{src_dst}, r:{operand}";
   }
 
   public class LLI_AndImm : LLInstruction
@@ -2755,7 +2755,7 @@ namespace llsc
       byteCode.AddRange(value);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_AND_IMM} {register}, {value.ElementsToString("X2")}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_AND_IMM} r:{register}, {value.ElementsToString("X2")}";
   }
 
   public class LLI_NegateRegister : LLInstruction
@@ -2773,7 +2773,7 @@ namespace llsc
       byteCode.Add((byte)register);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_NEGATE_REGISTER} {register}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_NEGATE_REGISTER} r:{register}";
   }
 
   public class LLI_EqualsRegister : LLInstruction
@@ -2793,7 +2793,7 @@ namespace llsc
       byteCode.Add((byte)operand);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_EQ_REGISTER} {src_dst}, {operand}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_EQ_REGISTER} r:{src_dst}, r:{operand}";
   }
 
   public class LLI_NotRegister : LLInstruction
@@ -2811,7 +2811,7 @@ namespace llsc
       byteCode.Add((byte)register);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_NOT_REGISTER} {register}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_NOT_REGISTER} r:{register}";
   }
 
   public class LLI_CallBuiltInFunction_IDFromRegister_ResultToRegister : LLInstruction
@@ -2832,7 +2832,7 @@ namespace llsc
       byteCode.Add(resultRegister);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER} {idRegister}, {resultRegister}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER} r:{idRegister}, r:{resultRegister}";
   }
 
   public class LLI_CallExternFunction_ResultToRegister : LLInstruction
@@ -2850,7 +2850,7 @@ namespace llsc
       byteCode.Add(resultRegister);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER} {resultRegister}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER} r:{resultRegister}";
   }
 
   public class LLI_CmpNotEq_ImmRegister : LLInstruction
@@ -2874,7 +2874,7 @@ namespace llsc
       byteCode.AddRange(imm);
     }
 
-    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CMP_NEQ_IMM_REGISTER} {register}, {imm.ElementsToString("X2")}";
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CMP_NEQ_IMM_REGISTER} r:{register}, {imm.ElementsToString("X2")}";
   }
 
   public class LLI_JumpIfTrue_Imm : LLInstruction
@@ -3154,12 +3154,11 @@ namespace llsc
 
           stackSize.Value += targetValue.type.GetSize();
         }
-
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize));
       }
-      
+
       byteCodeState.CopyValueToPosition(sourceValue, targetValue.position, stackSize);
-      
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize));
+
       if (targetValue.position.inRegister && targetValue is CNamedValue)
       {
         var t = targetValue as CNamedValue;
@@ -3196,7 +3195,7 @@ namespace llsc
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
-        this.returnValue = new CValue(file, line, function.returnType, true, true);
+        this.returnValue = new CValue(file, line, function.returnType, true, true) { description = $"Return Value of \"{function}\"" };
       else if (!(function.returnType is VoidCType))
         throw new NotImplementedException();
       else
@@ -3218,10 +3217,7 @@ namespace llsc
 
         var targetPosition = function.parameters[i].value.position;
         var sourceValue = arguments[i];
-
-        if (!targetPosition.inRegister)
-          targetPosition.stackOffsetForward = -targetPosition.stackOffsetForward;
-
+        
         byteCodeState.CopyValueToPositionWithCast(sourceValue, targetPosition, function.parameters[i].type, stackSize);
       }
 
@@ -3241,8 +3237,10 @@ namespace llsc
         }
 
         byteCodeState.instructions.Add(new LLI_CallBuiltInFunction_IDFromRegister_ResultToRegister(0, 0));
-
+        
         byteCodeState.registers[0] = returnValue;
+
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(returnValue, stackSize));
       }
       else
       {
@@ -3332,6 +3330,10 @@ namespace llsc
         {
           returnValueRegister = chosenIntRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
           byteCodeState.registers[chosenIntRegister] = null;
+        }
+        else
+        {
+          returnValueRegister = chosenIntRegister;
         }
 
         foreach (var param in function.parameters)
@@ -3451,10 +3453,10 @@ namespace llsc
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
+      byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"{source} => {target} (can explicit cast to {target.type.explicitCast})"));
+
       target.hasPosition = source.hasPosition;
-      target.position.inRegister = source.hasPosition;
-      target.position.registerIndex = source.position.registerIndex;
-      target.position.stackOffsetForward = source.position.stackOffsetForward;
+      target.position = source.position;
     }
   }
 
@@ -3592,6 +3594,10 @@ namespace llsc
             value.position.stackOffsetForward = value.homeStackOffset;
             byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace));
           }
+        }
+        else
+        {
+          byteCodeState.registers[i].hasPosition = false;
         }
 
         byteCodeState.registers[i] = null;
@@ -5109,7 +5115,6 @@ namespace llsc
         else
         {
           // Find first operator before ';'.
-          // TODO: Care about scope!
           int firstOperator = nodes.FindNextSameScope(n => n is NOperator || n is NLineEnd);
 
           if (nodes[firstOperator] is NLineEnd)

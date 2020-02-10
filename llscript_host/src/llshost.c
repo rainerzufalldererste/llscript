@@ -31,6 +31,7 @@
 
 #define LOG_INSTRUCTION_NAME(x) do { if (!silent) printf("\r% 16" PRIX64 ": " #x " ", (uint64_t)(pCodePtr - 1 - pState->pCode)); } while (0)
 #define LOG_ENUM(x) do { if (!silent) printf(#x); } while (0)
+#define LOG_REGISTER(x) do { if (!silent) printf("r:%" PRIu8 "", (uint8_t)(x)); } while (0)
 #define LOG_U8(x) do { if (!silent) printf("%" PRIu8 "", (uint8_t)(x)); } while (0)
 #define LOG_U64(x) do { if (!silent) printf("%" PRIu64 " (0x%" PRIX64 ")", (uint64_t)(x), (uint64_t)(x)); } while (0)
 #define LOG_X64(x) do { if (!silent) printf("0x%" PRIX64 "", (uint64_t)(x)); } while (0)
@@ -71,7 +72,7 @@ __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pS
     puts("\t\t// \tCould be stack pointer:");
     possiblePointer = true;
   }
-  else if (param > 0x00007FF000000000)
+  else if (param > 0x00007FF000000000 && param < 0x00007FFFFFFFFFFF)
   {
     puts("\t\t// \tCould be heap pointer.");
   }
@@ -93,14 +94,15 @@ __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pS
 #else
 #define LOG_INSTRUCTION_NAME(x)
 #define LOG_ENUM(x)
-#define LOG_U8(x) 
+#define LOG_REGISTER(x)
+#define LOG_U8(x)
 #define LOG_U64(x)
 #define LOG_X64(x)
 #define LOG_I64(x)
 #define LOG_F64(x)
 #define LOG_DELIMITER()
 #define LOG_DETAILS()
-#define LOG_STRING()
+#define LOG_STRING(x)
 #define LOG_INFO_START()
 #define LOG_INFO_END()
 #define LOG_END()
@@ -165,8 +167,8 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
         case 'b':
           fputs("Set breakpoint to: 0x", stdout);
-          scanf("%" PRIx64 "", &breakpoint);
-          printf("\nBreakpoint set at 0x%" PRIx64 ".\n", breakpoint);
+          scanf("%" PRIX64 "", &breakpoint);
+          printf("\nBreakpoint set at 0x%" PRIX64 ".\n", breakpoint);
           break;
 
         case 'r':
@@ -335,6 +337,8 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             {
               puts("Invalid Register Index.");
             }
+
+            break;
           }
 
           case 's':
@@ -350,6 +354,8 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             pStack[-stackOffset] = value;
 
             puts("\nSuccess!");
+
+            break;
           }
 
           case 'c':
@@ -361,10 +367,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             cmp = value;
 
             puts("\nSuccess!");
+
+            break;
           }
 
           default:
             puts("\nInvalid Option.");
+            break;
           }
         }
 
@@ -401,7 +410,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       if (target_register < 8)
@@ -429,13 +438,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       if (target_register < 8)
@@ -472,7 +481,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       if (source_register < 8)
@@ -498,7 +507,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       pCodePtr++;
 
       LOG_DELIMITER();
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_DELIMITER();
       LOG_U8(bytes);
       LOG_END();
@@ -519,7 +528,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       const uint8_t *pStackPtr = pStack - *(int64_t *)pCodePtr;
@@ -592,7 +601,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_ptr_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_ptr_register);
+      LOG_REGISTER(target_ptr_register);
       LOG_INFO_START();
       LOG_U64(iregister[target_ptr_register]);
       LOG_INFO_END();
@@ -626,7 +635,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_ptr_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_ptr_register);
+      LOG_REGISTER(target_ptr_register);
       LOG_INFO_START();
       LOG_U64(iregister[target_ptr_register]);
       LOG_INFO_END();
@@ -666,13 +675,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       const lls_code_t source_ptr_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_ptr_register);
+      LOG_REGISTER(source_ptr_register);
       LOG_INFO_START();
       LOG_U64(iregister[source_ptr_register]);
       LOG_INFO_END();
@@ -700,7 +709,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       const uint64_t *pSourceStackPtr = pStack - *(int64_t *)pCodePtr;
@@ -723,7 +732,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       if (source_register < 8)
@@ -748,7 +757,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_END();
 
       if (target_register < 8)
@@ -788,7 +797,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
 
       int64_t offset;
 
@@ -828,7 +837,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
 
       int64_t offset;
 
@@ -853,7 +862,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
       LOG_DELIMITER();
 
       if (target_register < 8)
@@ -888,13 +897,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_DELIMITER();
 
       const lls_code_t operand_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(operand_register);
+      LOG_REGISTER(operand_register);
       LOG_END();
 
       if (source_register < 8)
@@ -919,7 +928,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       if (source_register < 8)
@@ -938,7 +947,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       IF_LAST_OPT(source_register < 8)
@@ -955,7 +964,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_DELIMITER();
 
       const lls_code_t operand_register = *pCodePtr;
@@ -981,7 +990,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t value_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(value_register);
+      LOG_REGISTER(value_register);
       LOG_DELIMITER();
 
       if (value_register < 8)
@@ -1051,7 +1060,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       pCodePtr++;
 
       LOG_INSTRUCTION_NAME(LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER);
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
 
 #ifdef LLS_DEBUG_MODE
       if (!silent)
@@ -1137,13 +1146,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t id_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(id_register);
+      LOG_REGISTER(id_register);
       LOG_DELIMITER();
 
       const lls_code_t target_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(target_register);
+      LOG_REGISTER(target_register);
 
       IF_LAST_OPT(target_register < 8)
       {
@@ -1162,6 +1171,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             LPVOID(*HeapAlloc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = pState->pHeapAlloc;
 
             iregister[target_register] = (uint64_t)HeapAlloc(pState->pHeapHandle, 0, iregister[1]);
+
+            if (iregister[target_register] == 0)
+            {
+              LOG_DETAILS();
+              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_END();
+            }
           }
           ASSERT_NO_ELSE;
           break;
@@ -1196,6 +1212,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             LPVOID(*HeapReAlloc)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem, SIZE_T dwBytes) = pState->pHeapRealloc;
 
             iregister[target_register] = HeapReAlloc(pState->pHeapHandle, 0, iregister[1], iregister[2]);
+
+            if (iregister[target_register] == 0)
+            {
+              LOG_DETAILS();
+              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_END();
+            }
           }
           ASSERT_NO_ELSE;
           break;
@@ -1213,6 +1236,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             HMODULE(*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
 
             iregister[target_register] = LoadLibraryA(iregister[1]);
+
+            if (iregister[target_register] == 0)
+            {
+              LOG_DETAILS();
+              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_END();
+            }
           }
           ASSERT_NO_ELSE;
           break;
@@ -1232,6 +1262,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
             FARPROC(*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
 
             iregister[target_register] = GetProcAddress(iregister[1], iregister[2]);
+
+            if (iregister[target_register] == 0)
+            {
+              LOG_DETAILS();
+              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_END();
+            }
           }
           ASSERT_NO_ELSE;
           break;
