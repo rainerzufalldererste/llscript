@@ -3608,6 +3608,84 @@ namespace llsc
     }
   }
 
+  public class CInstruction_SetValuePtrToValue : CInstruction
+  {
+    private readonly CValue targetValuePtr, sourceValue;
+    private readonly SharedValue<long> stackSize;
+
+    public CInstruction_SetValuePtrToValue(CValue targetValuePtr, CValue sourceValue, string file, int line, SharedValue<long> stackSize) : base(file, line)
+    {
+      if (!(targetValuePtr.type is PtrCType))
+        Compiler.Error($"Cannot assign value '{sourceValue}' to non-pointer value '{sourceValue}' when dereference-assigning.", file, line);
+
+      this.targetValuePtr = targetValuePtr;
+      this.sourceValue = sourceValue;
+      this.stackSize = stackSize;
+
+      if (!sourceValue.type.CanImplicitCastTo((targetValuePtr.type as PtrCType).pointsTo))
+        Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned to '{(targetValuePtr.type as PtrCType).pointsTo}', because there is no implicit conversion available.", file, line);
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!(sourceValue is CConstIntValue || sourceValue is CConstFloatValue))
+        if (!sourceValue.hasPosition)
+          throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
+
+      // TODO: Handle casting!
+
+      var pointerType = targetValuePtr.type as PtrCType;
+      var size = pointerType.pointsTo.GetSize();
+
+      if (size <= 8)
+      {
+        int sourceValueRegister = byteCodeState.MoveValueToAnyRegister(sourceValue, stackSize);
+
+        var lockedRegister = byteCodeState.LockRegister(sourceValueRegister);
+
+        int targetPtrRegister = byteCodeState.MoveValueToAnyRegister(targetValuePtr, stackSize);
+
+        if (size < 8)
+          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(targetPtrRegister, sourceValueRegister, (byte)size));
+        else
+          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(targetPtrRegister, sourceValueRegister));
+      }
+      else // if (size > 8)
+      {
+        var remainingSize = size;
+
+        int sourceValueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+        var lockedSourceValueRegister = byteCodeState.LockRegister(sourceValueRegister);
+        int sourcePtrRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+        var lockedPtrValueRegister = byteCodeState.LockRegister(sourcePtrRegister);
+        int targetPtrRegister = byteCodeState.MoveValueToAnyRegister(targetValuePtr, stackSize);
+
+        if (sourceValue.position.inRegister)
+          throw new Exception("Internal Compiler Error!");
+
+        byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, sourcePtrRegister));
+
+        while (remainingSize > 0)
+        {
+          byteCodeState.instructions.Add(new LLI_MovFromPtrInRegisterToRegister(sourcePtrRegister, sourceValueRegister));
+
+          if (remainingSize < 8)
+            byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(targetPtrRegister, sourceValueRegister, (byte)size));
+          else
+            byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(targetPtrRegister, sourceValueRegister));
+
+          remainingSize -= 8;
+
+          if (remainingSize > 0)
+          {
+            byteCodeState.instructions.Add(new LLI_AddImm(sourcePtrRegister, BitConverter.GetBytes((ulong)8)));
+            byteCodeState.instructions.Add(new LLI_AddImm(targetPtrRegister, BitConverter.GetBytes((ulong)8)));
+          }
+        }
+      }
+    }
+  }
+
   public class CInstruction_CallFunction : CInstruction
   {
     private readonly CFunction function;
@@ -6253,21 +6331,46 @@ namespace llsc
           // lvalue = rvalue;
           else if ((nodes[firstOperator] as NOperator).operatorType == "=")
           {
-            var lnodes = nodes.GetRange(0, firstOperator);
-            var equalsNode = nodes[firstOperator];
-            var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
-            nodes.RemoveRange(0, nextEndLine + 1);
+            if (nodes[0] is NPseudoFunction && nodes[1] is NOpenParanthesis && nodes[firstOperator - 1] is NCloseParanthesis)
+            {
+              if ((nodes[0] as NPseudoFunction).type != NPseudoFunctionType.ValueOf)
+                Error($"Unexpected '{nodes[0]}'.", nodes[0].file, nodes[0].line);
 
-            var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
+              var paramNodes = nodes.GetRange(2, firstOperator - 3);
+              var equalsNode = nodes[firstOperator];
+              var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
+              nodes.RemoveRange(0, nextEndLine + 1);
 
-            if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
-              Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+              var rvalue = GetLValue(scope, rnodes, ref byteCodeState);
 
-            var lvalue = GetLValue(scope, lnodes, ref byteCodeState, rvalue.type);
+              if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
 
-            scope.instructions.Add(new CInstruction_SetValueTo(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+              var ptrValue = GetLValue(scope, paramNodes, ref byteCodeState);
 
-            lvalue.isInitialized = true;
+              if (!(ptrValue.type is PtrCType))
+                Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", rnodes[0].file, rnodes[1].line);
+
+              scope.instructions.Add(new CInstruction_SetValuePtrToValue(ptrValue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+            }
+            else
+            {
+              var lnodes = nodes.GetRange(0, firstOperator);
+              var equalsNode = nodes[firstOperator];
+              var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
+              nodes.RemoveRange(0, nextEndLine + 1);
+
+              var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
+
+              if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+
+              var lvalue = GetLValue(scope, lnodes, ref byteCodeState, rvalue.type);
+
+              scope.instructions.Add(new CInstruction_SetValueTo(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+
+              lvalue.isInitialized = true;
+            }
           }
           else
           {
@@ -6515,7 +6618,6 @@ namespace llsc
         else
         {
           var lnodes = nodes.GetRange(0, nextOperator);
-          var equalsNode = nodes[nextOperator];
           var rnodes = nodes.GetRange(nextOperator + 1, nodes.Count - (nextOperator + 1));
 
           var left = GetRValue(scope, rnodes, ref byteCodeState);
@@ -6532,7 +6634,10 @@ namespace llsc
           {
             case "=":
               {
-                scope.instructions.Add(new CInstruction_SetValueTo(left, right, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+                if (left.isConst)
+                  Error($"Cannot assign '{right}' to constant value '{left}'.", operatorNode.file, operatorNode.line);
+
+                scope.instructions.Add(new CInstruction_SetValueTo(left, right, operatorNode.file, operatorNode.line, scope.maxRequiredStackSpace));
 
                 right.isInitialized = true;
 
@@ -6737,6 +6842,16 @@ namespace llsc
               scope.instructions.Add(new CInstruction_CallFunctionPtr(value, parameters, out returnValue, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
 
               return returnValue;
+            }
+            else if (nodes[1] is NOpenBracket)
+            {
+              var xvalue = GetXValue(scope, nodes, ref byteCodeState);
+
+              CValue dereferencedValue;
+
+              scope.instructions.Add(new CInstruction_DereferencePtr(xvalue, out dereferencedValue, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
+
+              return dereferencedValue;
             }
             else
             {
