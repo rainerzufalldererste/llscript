@@ -3982,6 +3982,51 @@ namespace llsc
     }
   }
 
+  public class CInstruction_GetPointerOfArrayStart : CInstruction
+  {
+    CNamedValue value;
+    CValue outValue;
+    SharedValue<long> stackSize;
+
+    public CInstruction_GetPointerOfArrayStart(CNamedValue value, out CValue outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
+    {
+      if (!(value.type is ArrayCType))
+        throw new Exception("Internal Compiler Error: Unexpected Type.");
+
+      this.value = value;
+      this.outValue = outValue = new CValue(file, line, new PtrCType((value.type as ArrayCType).type), false, true) { description = $"reference to '{value}'[0]" };
+      this.stackSize = stackSize;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      value.isVolatile = true;
+      value.isInitialized = true; // Do we want this?
+
+      if (!value.hasPosition)
+      {
+        value.position = Position.StackOffset(stackSize.Value);
+        stackSize.Value += value.type.GetSize();
+        value.hasPosition = true;
+        value.hasStackOffset = true;
+        value.homeStackOffset = value.position.stackOffsetForward;
+        value.modifiedSinceLastHome = false;
+      }
+      else if (value.hasPosition & value.position.inRegister)
+      {
+        byteCodeState.MoveValueToHome(value, stackSize);
+      }
+
+      int register = byteCodeState.GetFreeIntegerRegister(stackSize);
+
+      outValue.hasPosition = true;
+      outValue.position = Position.Register(register);
+
+      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize));
+    }
+  }
+
   public class CInstruction_CopyPositionFromValueToValue : CInstruction
   {
     CValue source, target;
@@ -4264,6 +4309,16 @@ namespace llsc
       else
         this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} + {rvalue})" };
 
+      if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
+        throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
+
+      if ((lvalue is CConstFloatValue && !(rvalue is CConstFloatValue)) || (lvalue is CConstIntValue && !(rvalue is CConstIntValue)))
+      {
+        var tmp = lvalue;
+        lvalue = rvalue;
+        rvalue = tmp;
+      }
+
       resultingValue = this.resultingValue;
     }
 
@@ -4279,8 +4334,6 @@ namespace llsc
 
       var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex);
 
-      int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
-
       if (!toSelf && (lvalue is CNamedValue || lvalue is CGlobalValueReference))
       {
         if (lvalue is CNamedValue && (lvalue as CNamedValue).modifiedSinceLastHome)
@@ -4289,7 +4342,20 @@ namespace llsc
           throw new NotImplementedException();
       }
 
-      byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+      if (rvalue is CConstIntValue)
+      {
+        byteCodeState.instructions.Add(new LLI_AddImm(lvalueRegisterIndex, BitConverter.GetBytes((rvalue as CConstIntValue).uvalue)));
+      }
+      else if (rvalue is CConstFloatValue)
+      {
+        byteCodeState.instructions.Add(new LLI_AddImm(lvalueRegisterIndex, BitConverter.GetBytes((rvalue as CConstFloatValue).value)));
+      }
+      else
+      {
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+
+        byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+      }
 
       lvalue.remainingReferences--;
       rvalue.remainingReferences--;
@@ -6904,7 +6970,7 @@ namespace llsc
         {
           var variable = scope.GetVariable(nameNode.name);
 
-          if (variable == null)
+          if (variable != null)
           {
             CGlobalValueReference addressOf;
 
@@ -6919,7 +6985,70 @@ namespace llsc
         }
         else
         {
-          throw new NotImplementedException();
+          nodes.RemoveAt(0);
+
+          if (nodes.Count > 2 && nodes[0] is NOpenBracket && nodes[nodes.Count - 1] is NCloseBracket)
+          {
+            // is this a pair of brackets?
+            int bracketLevel = 0;
+
+            foreach (var node in nodes)
+              if (node is NOpenBracket)
+                bracketLevel++;
+              else if (node is NCloseBracket)
+                if (--bracketLevel == 0 && !object.ReferenceEquals(node, nodes[nodes.Count - 1]))
+                  Error($"Unexpected {node}.", node.file, node.line);
+            
+            var variable = scope.GetVariable(nameNode.name);
+
+            if (variable == null)
+              Error($"Invalid Token {nameNode}. Expected Variable Name.", nameNode.file, nameNode.line);
+
+            CValue ptrWithoutOffset;
+
+            if (variable.type is ArrayCType)
+            {
+              var type = variable.type as ArrayCType;
+
+              if (type.type is VoidCType)
+                Error($"Invalid array of type {type.type} ({variable}).", nameNode.file, nameNode.line);
+              
+              scope.instructions.Add(new CInstruction_GetPointerOfArrayStart(variable, out ptrWithoutOffset, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
+            }
+            else if (variable.type is PtrCType)
+            {
+              var type = variable.type as PtrCType;
+
+              if (type.pointsTo is VoidCType)
+                Error($"Cannot use array accessor on pointer of type {type.pointsTo} ({variable}).", nameNode.file, nameNode.line);
+
+              ptrWithoutOffset = variable;
+            }
+            else
+            {
+              Error($"Cannot use array accessor on type {variable.type}. Expected Pointer or Array.", nameNode.file, nameNode.line);
+              return null; // Unreachable.
+            }
+
+            var index = GetRValue(scope, nodes.GetRange(1, nodes.Count - 2), ref byteCodeState);
+
+            if ((ptrWithoutOffset.type as PtrCType).pointsTo.GetSize() != 1)
+            {
+              CValue newIndex = null;
+              scope.instructions.Add(new CInstruction_Multiply(index, new CConstIntValue((ulong)(ptrWithoutOffset.type as PtrCType).pointsTo.GetSize(), BuiltInCType.Types["u64"], null, -1), scope.maxRequiredStackSpace, false, out newIndex, nodes[0].file, nodes[0].line));
+              index = newIndex;
+            }
+
+            CValue offsetPtr;
+            scope.instructions.Add(new CInstruction_Add(ptrWithoutOffset, index, scope.maxRequiredStackSpace, false, out offsetPtr, nodes[0].file, nodes[0].line));
+
+            return offsetPtr;
+          }
+          else
+          {
+            Error($"Unexpected {nodes[0]}.", nodes[0].file, nodes[0].line);
+            return null; // Unreachable.
+          }
         }
       }
       else
