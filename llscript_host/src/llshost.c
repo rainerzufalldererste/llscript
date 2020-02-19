@@ -921,6 +921,58 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_AND_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_AND_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      IF_LAST_OPT(target_register < 8)
+      {
+        const uint64_t imm = *(uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
+
+        LOG_U64(imm);
+
+        iregister[target_register] &= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_AND_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_AND_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT (source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] &= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_NEGATE_REGISTER:
     {
       LOG_INSTRUCTION_NAME(LLS_OP_NEGATE_REGISTER);

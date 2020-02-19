@@ -926,9 +926,15 @@ namespace llsc
 
     public int lastTouchedInstructionCount = 0;
 
-    protected CValue() { }
+    private static int lastIndex = 0;
+    private readonly int index = ++lastIndex;
 
-    public CValue(string file, int line, CType type, bool isConst, bool isInitialized)
+    protected CValue()
+    {
+
+    }
+
+    public CValue(string file, int line, CType type, bool isConst, bool isInitialized) : base()
     {
       this.file = file;
       this.line = line;
@@ -937,7 +943,7 @@ namespace llsc
       this.isInitialized = isInitialized;
     }
 
-    public override string ToString() => "unnamed value [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => $"unnamed value #{index} [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
 
     public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -953,7 +959,7 @@ namespace llsc
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
 
       return ret;
     }
@@ -1048,7 +1054,7 @@ namespace llsc
       ret.uvalue = uvalue;
       ret.ivalue = ivalue;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
 
       return ret;
     }
@@ -1090,7 +1096,7 @@ namespace llsc
 
       ret.value = value;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
 
       return ret;
     }
@@ -1137,7 +1143,7 @@ namespace llsc
       ret.homeStackOffset = 0;
       ret.modifiedSinceLastHome = false;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
 
       return ret;
     }
@@ -1344,6 +1350,13 @@ namespace llsc
       ret.stackOffsetForward = stackOffsetForward;
 
       return ret;
+    }
+
+    public override string ToString()
+    {
+      if (inRegister)
+        return $"r:{registerIndex}";
+      return $"stackOffsetForward:{stackOffsetForward}";
     }
   }
 
@@ -1591,6 +1604,7 @@ namespace llsc
         if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           registers[i].hasPosition = false;
+          registers[i] = null;
           return i;
         }
       }
@@ -1609,7 +1623,8 @@ namespace llsc
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].hasPosition = false;
+            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i] = null;
             return i;
           }
 
@@ -1651,7 +1666,11 @@ namespace llsc
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
         if (registers[i].remainingReferences == 0 && !registerLocked[i])
+        {
+          registers[i].hasPosition = false;
+          registers[i] = null;
           return i;
+        }
 
       int oldestIndex = -1;
       int oldestValue = 0;
@@ -1667,7 +1686,8 @@ namespace llsc
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].hasPosition = false;
+            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i] = null;
             return i;
           }
 
@@ -1711,6 +1731,7 @@ namespace llsc
         if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           registers[i].hasPosition = false;
+          registers[i] = null;
           return i;
         }
 
@@ -1718,7 +1739,8 @@ namespace llsc
         if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].hasPosition = false;
+            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i] = null;
             return i;
           }
 
@@ -1735,6 +1757,7 @@ namespace llsc
         if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           registers[i].hasPosition = false;
+          registers[i] = null;
           return i;
         }
 
@@ -1742,7 +1765,8 @@ namespace llsc
         if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].hasPosition = false;
+            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i] = null;
             return i;
           }
 
@@ -1755,7 +1779,10 @@ namespace llsc
         return;
 
       if (registers[register] is CNamedValue && (registers[register] as CNamedValue).hasStackOffset && !(registers[register] as CNamedValue).modifiedSinceLastHome)
-        return;
+      {
+        registers[register].position = Position.StackOffset((registers[register] as CNamedValue).homeStackOffset);
+        registers[register] = null;
+      }
 
       int triviallyFreeRegister = register < Compiler.IntegerRegisters ? GetTriviallyFreeIntegerRegister() : GetTriviallyFreeFloatRegister();
 
@@ -1790,6 +1817,7 @@ namespace llsc
           namedValue.position.inRegister = false;
           namedValue.position.stackOffsetForward = namedValue.homeStackOffset;
           namedValue.modifiedSinceLastHome = false;
+          registers[register] = null;
         }
         else
         {
@@ -1804,6 +1832,7 @@ namespace llsc
           namedValue.position.inRegister = false;
           namedValue.position.stackOffsetForward = namedValue.homeStackOffset;
           namedValue.modifiedSinceLastHome = false;
+          registers[register] = null;
 
           stackSize.Value += size;
         }
@@ -1817,6 +1846,7 @@ namespace llsc
 
         registers[register].position.inRegister = false;
         registers[register].position.stackOffsetForward = stackSize.Value;
+        registers[register] = null;
 
         stackSize.Value += size;
       }
@@ -2020,8 +2050,9 @@ namespace llsc
           }
         }
       }
-      
-      instructions.Add(new LLI_Location_PseudoInstruction(sourceValue, stackSize));
+
+      sourceValue.position = targetPosition;
+      instructions.Add(new LLI_Location_PseudoInstruction(sourceValue, stackSize, this));
     }
 
     public void CopyValueToPositionWithCast(CValue sourceValue, Position targetPosition, CType targetType, SharedValue<long> stackSize)
@@ -2127,7 +2158,11 @@ namespace llsc
         if (value.position.inRegister)
         {
           if (registers[value.position.registerIndex] != value)
+          {
+            string expectedValue = registers[value.position.registerIndex]?.ToString() ?? "{null}";
+            instructions.Add(new LLI_Comment_PseudoInstruction($"!!! Compiler Error: r:{value.position.registerIndex} is {expectedValue} but was expected to be {value}."));
             throw new Exception("Internal Compiler Error.");
+          }
 
           return (byte)value.position.registerIndex;
         }
@@ -2142,7 +2177,7 @@ namespace llsc
         value.position.inRegister = true;
         value.position.registerIndex = registerIndex;
         
-        instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize));
+        instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
 
         return (byte)registerIndex;
       }
@@ -2344,7 +2379,7 @@ namespace llsc
     public Position location;
     public SharedValue<long> stackSize;
 
-    public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize) : base(0)
+    public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize, ByteCodeState byteCodeState) : base(0)
     {
       if (!value.hasPosition)
         throw new Exception("Internal Compiler Error!");
@@ -2356,6 +2391,9 @@ namespace llsc
 
       location = value.position;
       this.stackSize = stackSize;
+
+      if (value.position.inRegister && byteCodeState.registers[value.position.registerIndex] != value)
+        throw new Exception("Internal Compiler Error: Value not available in specified register.");
     }
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
@@ -3596,7 +3634,7 @@ namespace llsc
       }
 
       byteCodeState.CopyValueToPosition(sourceValue, targetValue.position, stackSize);
-      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize));
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
 
       if (targetValue.position.inRegister && targetValue is CNamedValue)
       {
@@ -3757,7 +3795,7 @@ namespace llsc
         
         byteCodeState.registers[0] = returnValue;
 
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(returnValue, stackSize));
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(returnValue, stackSize, byteCodeState));
       }
       else
       {
@@ -3873,7 +3911,7 @@ namespace llsc
           }
         }
 
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(functionPtr, stackSize));
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(functionPtr, stackSize, byteCodeState));
 
         // Function Pointer.
         if (functionPtr.position.inRegister)
@@ -3994,9 +4032,10 @@ namespace llsc
 
       outValue.hasPosition = true;
       outValue.position = Position.Register(register);
+      byteCodeState.registers[register] = outValue;
 
       byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
-      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize));
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
     }
   }
 
@@ -4033,7 +4072,7 @@ namespace llsc
         outValue.hasPosition = true;
         outValue.position = Position.Register(register);
 
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize));
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
       }
       else
       {
@@ -4054,8 +4093,6 @@ namespace llsc
 
           remainingSize -= 8;
         }
-
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize));
       }
     }
   }
@@ -4099,26 +4136,58 @@ namespace llsc
 
       outValue.hasPosition = true;
       outValue.position = Position.Register(register);
+      byteCodeState.registers[register] = outValue;
 
       byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
-      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize));
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
     }
   }
 
   public class CInstruction_CopyPositionFromValueToValue : CInstruction
   {
     CValue source, target;
+    SharedValue<long> stackSize;
 
-    public CInstruction_CopyPositionFromValueToValue(CValue source, CValue target) : base(null, 0)
+    public CInstruction_CopyPositionFromValueToValue(CValue source, CValue target, SharedValue<long> stackSize) : base(null, 0)
     {
       this.source = source;
       this.target = target;
+      this.stackSize = stackSize;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
+      if (source.hasPosition && source.position.inRegister)
+      {
+        if (byteCodeState.registers[source.position.registerIndex] != source)
+          throw new Exception("Internal Compiler Error: Register Index not actually referenced.");
+
+        byteCodeState.registers[source.position.registerIndex] = target;
+      }
+
       target.hasPosition = source.hasPosition;
       target.position = source.position;
+
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(target, stackSize, byteCodeState));
+
+      source.remainingReferences--;
+
+      if (source is CNamedValue)
+      {
+        byteCodeState.MoveValueToHome(source as CNamedValue, stackSize);
+      }
+      else if (source.hasPosition && source.position.inRegister && source.remainingReferences > 0)
+      {
+        var newPosition = Position.StackOffset(stackSize.Value);
+        stackSize.Value += source.type.GetSize();
+
+        byteCodeState.MoveValueToPosition(source, newPosition, stackSize, false);
+      }
+    }
+
+    public override string ToString()
+    {
+      return base.ToString() + $" ({source} " + (source.hasPosition ? $"@{source.position}" : "{AT_NO_POSITION}") + $" to {target})";
     }
   }
 
@@ -4169,7 +4238,7 @@ namespace llsc
 
               value.position.inRegister = false;
               value.position.stackOffsetForward = value.homeStackOffset;
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize));
+              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
             }
             else
             {
@@ -4186,7 +4255,7 @@ namespace llsc
               else
                 byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homeStackOffset, (int)size));
               
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize));
+              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
             }
           }
 
@@ -4237,7 +4306,7 @@ namespace llsc
 
             value.position.inRegister = false;
             value.position.stackOffsetForward = value.homeStackOffset;
-            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace));
+            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
           }
           else
           {
@@ -4254,7 +4323,7 @@ namespace llsc
 
             value.position.inRegister = false;
             value.position.stackOffsetForward = value.homeStackOffset;
-            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace));
+            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
           }
         }
         else
@@ -4288,7 +4357,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -4306,7 +4375,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -4324,7 +4393,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"{value} + {imm}" };
+        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -4385,7 +4454,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} + {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} + {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -4475,7 +4544,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} - {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} - {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -4545,7 +4614,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} * {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} * {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -4642,7 +4711,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} / {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} / {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -4731,7 +4800,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} % {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} % {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -4811,7 +4880,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} & {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} & {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -4900,7 +4969,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() > rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} {operatorChars} {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} {operatorChars} {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -5231,6 +5300,8 @@ namespace llsc
     public static int OptimizationLevel { get; private set; } = 1;
     public static bool EmitAsm { get; private set; } = false;
 
+    public static bool DetailedIntermediateOutput { get; private set; } = false;
+
     public static readonly int IntegerRegisters = 8;
     public static readonly int FloatRegisters = 8;
 
@@ -5295,6 +5366,11 @@ namespace llsc
 
             case "-S":
               EmitAsm = true;
+              break;
+
+            case "-S+":
+              EmitAsm = true;
+              DetailedIntermediateOutput = true;
               break;
 
             default:
@@ -6341,12 +6417,12 @@ namespace llsc
               var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
               nodes.RemoveRange(0, nextEndLine + 1);
 
-              var rvalue = GetLValue(scope, rnodes, ref byteCodeState);
+              var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
 
               if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
                 Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
 
-              var ptrValue = GetLValue(scope, paramNodes, ref byteCodeState);
+              var ptrValue = GetRValue(scope, paramNodes, ref byteCodeState);
 
               if (!(ptrValue.type is PtrCType))
                 Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", rnodes[0].file, rnodes[1].line);
@@ -6399,6 +6475,9 @@ namespace llsc
         {
           LLInstruction.currentFile = instruction.file;
           LLInstruction.currentLine = instruction.line;
+
+          if (DetailedIntermediateOutput)
+            byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction}"));
 
           instruction.GetLLInstructions(ref byteCodeState);
         }
@@ -6945,7 +7024,11 @@ namespace llsc
         else if (!rValueToCast.type.CanExplicitCastTo(targetType) && !rValueToCast.type.CanImplicitCastTo(targetType))
           Error($"Explicit cast from type '{rValueToCast.type}' to type '{targetType}' is not possible for value '{rValueToCast}' (Defined in File '{rValueToCast.file ?? "?"}', Line {rValueToCast.line}).", nodes[0].file, nodes[0].line);
         else
+        {
+          rValueToCast.remainingReferences++;
+
           return rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState);
+        }
 
         return null; // Unreachable.
       }
