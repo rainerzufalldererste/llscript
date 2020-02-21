@@ -293,7 +293,10 @@ namespace llsc
     CountOf,
     AddressOf,
     ValueOf,
-    OffsetOf
+    OffsetOf,
+    FromRegister,
+    ToRegister,
+    Exit
   }
 
   public class NPseudoFunction : Node
@@ -322,6 +325,18 @@ namespace llsc
 
         case "offsetof":
           type = NPseudoFunctionType.OffsetOf;
+          break;
+
+        case "__from_register":
+          type = NPseudoFunctionType.FromRegister;
+          break;
+
+        case "__to_register":
+          type = NPseudoFunctionType.ToRegister;
+          break;
+
+        case "__exit":
+          type = NPseudoFunctionType.Exit;
           break;
 
         default:
@@ -3386,6 +3401,18 @@ namespace llsc
     public abstract void GetLLInstructions(ref ByteCodeState byteCodeState);
   }
 
+  public class CInstruction_CustomAction : CInstruction
+  {
+    readonly Action<ByteCodeState> action;
+
+    public CInstruction_CustomAction(Action<ByteCodeState> action, string file, int line) : base(file, line) => this.action = action;
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      action(byteCodeState);
+    }
+  }
+
   public class CInstruction_Label : CInstruction
   {
     readonly LLI_Label_PseudoInstruction label;
@@ -5739,6 +5766,9 @@ namespace llsc
             case "addressof":
             case "valueof":
             case "offsetof":
+            case "__from_register":
+            case "__to_register":
+            case "__exit":
               file.nodes[i] = new NPseudoFunction(((NName)node).name, node.file, node.line);
               break;
 
@@ -6349,6 +6379,19 @@ namespace llsc
           scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(GetRValue(scope, condition.ToList(), ref byteCodeState), afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_GotoLabel(beforeWhileLabel, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(afterWhileLabel, whileNode.file, whileNode.line));
+        }
+        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenScope), typeof(NName), typeof(NComma), typeof(NIntegerValue), typeof(NCloseScope)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.ToRegister)
+        {
+          scope.instructions.Add(new CInstruction_CustomAction(b => { b.MoveValueToPosition(scope.GetVariable((nodes[2] as NName).name), Position.Register((int)(nodes[4] as NIntegerValue).uint_value), scope.maxRequiredStackSpace, false); }, nodes[0].file, nodes[0].line));
+          nodes.RemoveRange(0, 6);
+        }
+        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenScope), typeof(NCloseScope)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.Exit)
+        {
+          scope.instructions.Add(new CInstruction_CustomAction(b => { b.instructions.Add(new LLI_Exit()); }, nodes[0].file, nodes[0].line));
+          nodes.RemoveRange(0, 3);
+
+          if (nodes.Count != 0)
+            Warn("Unreachable Code.", nodes[0].file, nodes[0].line);
         }
         else
         {
@@ -7129,6 +7172,22 @@ namespace llsc
               scope.instructions.Add(new CInstruction_DereferencePtr(rvalue, out derefValue, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
 
               return derefValue;
+            }
+
+          case NPseudoFunctionType.FromRegister:
+            {
+              if (nodes.Count != 4 || !(nodes[2] is NIntegerValue))
+                Error($"Unexpected {nodes[2]} in {nodes[0]}.", nodes[2].file, nodes[2].line);
+
+              var registerIndexNode = nodes[2] as NIntegerValue;
+
+              if (registerIndexNode.isForcefullyNegative || registerIndexNode.uint_value >= (ulong)(IntegerRegisters + FloatRegisters))
+                Error($"Invalid register index in {nodes[0]}: {nodes[2]}. Expected 0 .. {Compiler.IntegerRegisters + Compiler.FloatRegisters - 1}", nodes[2].file, nodes[2].line);
+
+              if (registerIndexNode.uint_value < (ulong)IntegerRegisters)
+                return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["u64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+              else
+                return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["f64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
             }
 
           default:

@@ -123,6 +123,9 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
   double fregister[8];
   bool cmp = false;
 
+  CopyBytes(iregister, pState->registerValues, sizeof(iregister));
+  CopyBytes(fregister, pState->registerValues + 8, sizeof(fregister));
+
 #ifdef LLS_DEBUG_MODE
   bool silent = false;
   bool stepInstructions = true;
@@ -401,6 +404,10 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     case LLS_OP_EXIT:
       LOG_INSTRUCTION_NAME(LLS_OP_EXIT);
       LOG_END();
+
+      CopyBytes(pState->registerValues, iregister, sizeof(iregister));
+      CopyBytes(pState->registerValues + 8, fregister, sizeof(fregister));
+
       return;
 
     case LLS_OP_MOV_IMM_REGISTER:
@@ -1541,4 +1548,11 @@ void llshost(void *pCodePtr, void *pCallFunc)
   llshost_Setup(&state);
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
+}
+
+void llshost_from_state(llshost_state_t *pState)
+{
+  llshost_Setup(pState);
+  llshost_EvaluateCode(pState);
+  llshost_Cleanup(pState);
 }

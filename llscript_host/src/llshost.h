@@ -34,6 +34,7 @@ typedef struct
   void *pCallFuncShellcode; // not required, will be looked for after the function otherwise.
   llshost_host_function_t *pHostFunctions; // null terminated list of available host functions.
   const lls_code_t *pCode;
+  uint64_t registerValues[16];
   uint64_t stackSize;
   uint8_t *pStack;
   void *pLoadLibrary, *pGetProcAddress, *pHeapAlloc, *pHeapRealloc, *pHeapFree, *pHeapDestroy, *pHeapHandle;
@@ -43,6 +44,7 @@ typedef struct
 void llshost_position_independent();
 
 void llshost(void *pCodePtr, void *pCallFunc);
+void llshost_from_state(llshost_state_t *pState);
 
 #define LLS_CODE_START_PATTERN (0x31719E1203636F37)
 #define LLS_DEFUALT_STACK_SIZE (0x1000000) // 16 MB
