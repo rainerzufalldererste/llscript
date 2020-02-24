@@ -266,6 +266,13 @@ namespace llsc
     public override string ToString() => "'float'";
   }
 
+  public class NCharKeyword : Node
+  {
+    public NCharKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'char'";
+  }
+
   public class NIfKeyword : Node
   {
     public NIfKeyword(string file, int line) : base(file, line) { }
@@ -287,6 +294,13 @@ namespace llsc
     public override string ToString() => "'while'";
   }
 
+  public class NReturnKeyword : Node
+  {
+    public NReturnKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'return'";
+  }
+
   public enum NPseudoFunctionType
   {
     SizeOf,
@@ -296,7 +310,9 @@ namespace llsc
     OffsetOf,
     FromRegister,
     ToRegister,
-    Exit
+    Exit,
+    Line,
+    File
   }
 
   public class NPseudoFunction : Node
@@ -337,6 +353,14 @@ namespace llsc
 
         case "__exit":
           type = NPseudoFunctionType.Exit;
+          break;
+
+        case "__line":
+          type = NPseudoFunctionType.Line;
+          break;
+
+        case "__file":
+          type = NPseudoFunctionType.File;
           break;
 
         default:
@@ -431,7 +455,7 @@ namespace llsc
 
     public long int_value { get { return _int_value; } }
 
-    private NIntegerValue(bool forcefullyNegative, ulong uvalue, long value, string file, int line) : base(file, line)
+    public NIntegerValue(bool forcefullyNegative, ulong uvalue, long value, string file, int line) : base(file, line)
     {
       this._uint_value = uvalue;
       this._int_value = value;
@@ -543,11 +567,23 @@ namespace llsc
 
     public static bool operator ==(CType a, CType b)
     {
+      if (object.ReferenceEquals(a, null) ^ object.ReferenceEquals(b, null))
+        return false;
+
+      if (object.ReferenceEquals(a, b))
+        return true;
+
       return a.Equals(b);
     }
 
     public static bool operator !=(CType a, CType b)
     {
+      if (object.ReferenceEquals(a, null) ^ object.ReferenceEquals(b, null))
+        return true;
+
+      if (object.ReferenceEquals(a, b))
+        return false;
+
       return !a.Equals(b);
     }
 
@@ -3369,6 +3405,36 @@ namespace llsc
     public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER} r:{resultRegister}";
   }
 
+  public class LLI_CallFunctionAtRelativeImm : LLInstruction
+  {
+    LLI_Label_PseudoInstruction label;
+
+    public LLI_CallFunctionAtRelativeImm(LLI_Label_PseudoInstruction label) : base(1 + 8)
+    {
+      this.label = label;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_CALL_INTERNAL_IMM);
+      byteCode.AddRange(BitConverter.GetBytes((long)label.position - (long)(this.position + this.bytecodeSize)));
+    }
+
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_CALL_INTERNAL_IMM} label_0x{label.GetHashCode():X}_at_0x{label.position:X}";
+  }
+
+  public class LLI_Return : LLInstruction
+  {
+    public LLI_Return() : base(1) { }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_RETURN_INTERNAL);
+    }
+
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_RETURN_INTERNAL}";
+  }
+
   public class LLI_CmpNotEq_ImmRegister : LLInstruction
   {
     byte register;
@@ -3540,6 +3606,7 @@ namespace llsc
           byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
 
       byteCodeState.instructions.Add(new LLI_StackDecrementImm(function.minStackSize, 0));
+      byteCodeState.instructions.Add(new LLI_Return());
 
       byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("End of Function: " + function));
     }
@@ -3718,14 +3785,14 @@ namespace llsc
     public CInstruction_SetValuePtrToValue(CValue targetValuePtr, CValue sourceValue, string file, int line, SharedValue<long> stackSize) : base(file, line)
     {
       if (!(targetValuePtr.type is PtrCType))
-        Compiler.Error($"Cannot assign value '{sourceValue}' to non-pointer value '{sourceValue}' when dereference-assigning.", file, line);
+        Compiler.Error($"Cannot assign value '{sourceValue}' to non-pointer value '{targetValuePtr}' when dereference-assigning.", file, line);
 
       this.targetValuePtr = targetValuePtr;
       this.sourceValue = sourceValue;
       this.stackSize = stackSize;
 
       if (!sourceValue.type.CanImplicitCastTo((targetValuePtr.type as PtrCType).pointsTo))
-        Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned to '{(targetValuePtr.type as PtrCType).pointsTo}', because there is no implicit conversion available.", file, line);
+        Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned dereference of {targetValuePtr} to of type '{(targetValuePtr.type as PtrCType).pointsTo}', because there is no implicit conversion available.", file, line);
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -5118,14 +5185,14 @@ namespace llsc
 
   public class CInstruction_BitShiftLeft : CInstruction_IntOnIntRegister
   {
-    public CInstruction_BitShiftLeft(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(lvalue, rvalue, stackSize, toSelf, out resultingValue, file, line, "<<", (int lval, int rval) => new LLI_BitShiftLeftRegister(lval, rval))
+    public CInstruction_BitShiftLeft(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(lvalue, rvalue, stackSize, toSelf, out resultingValue, file, line, "#<#", (int lval, int rval) => new LLI_BitShiftLeftRegister(lval, rval))
     {
     }
   }
 
   public class CInstruction_BitShiftRight : CInstruction_IntOnIntRegister
   {
-    public CInstruction_BitShiftRight(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(lvalue, rvalue, stackSize, toSelf, out resultingValue, file, line, ">>", (int lval, int rval) => new LLI_BitShiftRightRegister(lval, rval))
+    public CInstruction_BitShiftRight(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(lvalue, rvalue, stackSize, toSelf, out resultingValue, file, line, "#>#", (int lval, int rval) => new LLI_BitShiftRightRegister(lval, rval))
     {
     }
   }
@@ -5372,6 +5439,17 @@ namespace llsc
     public Scope GetChildScopeForConditional(LLI_Label_PseudoInstruction afterLabel)
     {
       return new Scope(this) { afterLabel = afterLabel };
+    }
+
+    public CFunction GetCurrentFunction()
+    {
+      if (self != null)
+        return self;
+
+      if (parentScope == null)
+        return null;
+
+      return parentScope.GetCurrentFunction();
     }
   }
 
@@ -5677,6 +5755,11 @@ namespace llsc
                 nodes.Add(new NDereferenceAttributeOperator(file.filename, line));
                 start += 2;
               }
+              else if (lineString.NextIs(start, "#<#") || lineString.NextIs(start, "#>#"))
+              {
+                nodes.Add(new NOperator(lineString.Substring(start, 3), file.filename, line));
+                start += 3;
+              }
               else if (lineString.NextIs(start, "==") || lineString.NextIs(start, "!=") || lineString.NextIs(start, "<=") || lineString.NextIs(start, ">=") || lineString.NextIs(start, "++") || lineString.NextIs(start, "--") || lineString.NextIs(start, "+=") || lineString.NextIs(start, "-=") || lineString.NextIs(start, "*=") || lineString.NextIs(start, "/=") || lineString.NextIs(start, "|=") || lineString.NextIs(start, "&=") || lineString.NextIs(start, "^=") || lineString.NextIs(start, "&&") || lineString.NextIs(start, "||"))
               {
                 nodes.Add(new NOperator(lineString.Substring(start, 2), file.filename, line));
@@ -5827,6 +5910,10 @@ namespace llsc
               file.nodes[i] = new NFloatKeyword(node.file, node.line);
               break;
 
+            case "char":
+              file.nodes[i] = new NCharKeyword(node.file, node.line);
+              break;
+
             case "if":
               file.nodes[i] = new NIfKeyword(node.file, node.line);
               break;
@@ -5839,6 +5926,10 @@ namespace llsc
               file.nodes[i] = new NWhileKeyword(node.file, node.line);
               break;
 
+            case "return":
+              file.nodes[i] = new NReturnKeyword(node.file, node.line);
+              break;
+
             case "sizeof":
             case "countof":
             case "addressof":
@@ -5847,6 +5938,8 @@ namespace llsc
             case "__from_register":
             case "__to_register":
             case "__exit":
+            case "__line":
+            case "__file":
               file.nodes[i] = new NPseudoFunction(((NName)node).name, node.file, node.line);
               break;
 
@@ -5996,7 +6089,7 @@ namespace llsc
               throw new Exception("Internal Compiler Error");
           }
         }
-        else if (nodes.NextIs(typeof(NFloatKeyword), typeof(NOpenParanthesis), typeof(NStringValue), typeof(NCloseParanthesis)))
+        else if (nodes.NextIs(i, typeof(NFloatKeyword), typeof(NOpenParanthesis), typeof(NStringValue), typeof(NCloseParanthesis)))
         {
           var start = nodes[i];
           var value = nodes[i + 2];
@@ -6007,6 +6100,17 @@ namespace llsc
 
           nodes.RemoveRange(i, 4);
           nodes.Insert(i, new NFloatingPointValue(floatValue, start.file, start.line));
+        }
+        else if (nodes.NextIs(i, typeof(NCharKeyword), typeof(NOpenParanthesis), typeof(NStringValue), typeof(NCloseParanthesis)))
+        {
+          var start = nodes[i];
+          var value = nodes[i + 2] as NStringValue;
+
+          if (value.value.Length != 1)
+            Error($"Invalid character value '{(value as NStringValue).value}' must be of length 1.", value.file, value.line);
+
+          nodes.RemoveRange(i, 4);
+          nodes.Insert(i, new NIntegerValue(false, value.value[0], value.value[0], start.file, start.line));
         }
       }
     }
@@ -6458,18 +6562,41 @@ namespace llsc
           scope.instructions.Add(new CInstruction_GotoLabel(beforeWhileLabel, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(afterWhileLabel, whileNode.file, whileNode.line));
         }
-        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenScope), typeof(NName), typeof(NComma), typeof(NIntegerValue), typeof(NCloseScope)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.ToRegister)
+        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenParanthesis), typeof(NName), typeof(NComma), typeof(NIntegerValue), typeof(NCloseParanthesis), typeof(NLineEnd)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.ToRegister)
         {
           scope.instructions.Add(new CInstruction_CustomAction(b => { b.MoveValueToPosition(scope.GetVariable((nodes[2] as NName).name), Position.Register((int)(nodes[4] as NIntegerValue).uint_value), scope.maxRequiredStackSpace, false); }, nodes[0].file, nodes[0].line));
-          nodes.RemoveRange(0, 6);
+          nodes.RemoveRange(0, 7);
         }
-        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenScope), typeof(NCloseScope)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.Exit)
+        else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenParanthesis), typeof(NCloseParanthesis), typeof(NLineEnd)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.Exit)
         {
           scope.instructions.Add(new CInstruction_CustomAction(b => { b.instructions.Add(new LLI_Exit()); }, nodes[0].file, nodes[0].line));
-          nodes.RemoveRange(0, 3);
+          nodes.RemoveRange(0, 4);
 
           if (nodes.Count != 0)
             Warn("Unreachable Code.", nodes[0].file, nodes[0].line);
+        }
+        else if (nodes[0] is NReturnKeyword)
+        {
+          var parentFunction = scope.GetCurrentFunction();
+
+          if (parentFunction == null)
+            Error($"Cannot use {nodes[0]} in global scope.", nodes[0].file, nodes[0].line);
+
+          if (parentFunction.returnType is VoidCType)
+          {
+            if (!(nodes[1] is NLineEnd))
+              Error($"Unexpected {nodes[1]} in {nodes[0]} statement.", nodes[1].file, nodes[1].line);
+            
+            scope.instructions.Add(new CInstruction_CustomAction(b => { b.instructions.Add(new LLI_StackDecrementImm(scope.maxRequiredStackSpace)); b.instructions.Add(new LLI_Return()); }, nodes[0].file, nodes[0].line));
+            nodes.RemoveRange(0, 2);
+
+            if (nodes.Count != 0)
+              Warn("Unreachable Code.", nodes[0].file, nodes[0].line);
+          }
+          else
+          {
+            throw new NotImplementedException();
+          }
         }
         else
         {
@@ -6846,7 +6973,7 @@ namespace llsc
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "*", "/", "%", "&", "^" }.Contains((n as NOperator).operatorType));
 
       if (nextOperator == -1)
-        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "+", "-", "|", "<<", ">>" }.Contains((n as NOperator).operatorType));
+        nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "+", "-", "|", "#<#", "#>#" }.Contains((n as NOperator).operatorType));
 
       if (nextOperator == -1)
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "~", "!" }.Contains((n as NOperator).operatorType));
@@ -6984,7 +7111,7 @@ namespace llsc
                 return resultingValue;
               }
 
-            case "<<":
+            case "#<#":
               {
                 CValue resultingValue;
 
@@ -6993,7 +7120,7 @@ namespace llsc
                 return resultingValue;
               }
 
-            case ">>":
+            case "#>#":
               {
                 CValue resultingValue;
 
@@ -7350,6 +7477,16 @@ namespace llsc
                 return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["u64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
               else
                 return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["f64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+            }
+
+          case NPseudoFunctionType.Line:
+            {
+              return new CConstIntValue((ulong)nodes[0].line, BuiltInCType.Types["u64"], nodes[0].file, nodes[0].line);
+            }
+
+          case NPseudoFunctionType.File:
+            {
+              throw new NotImplementedException();
             }
 
           default:
