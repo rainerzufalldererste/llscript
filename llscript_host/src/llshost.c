@@ -786,7 +786,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     {
       LOG_INSTRUCTION_NAME(LLS_OP_STACK_INC_IMM);
 
-      const int64_t imm = *pCodePtr;
+      const int64_t imm = *(int64_t *)pCodePtr;
       pCodePtr += sizeof(int64_t);
 
       LOG_I64(imm);
@@ -826,7 +826,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
     {
       LOG_INSTRUCTION_NAME(LLS_OP_STACK_DEC_IMM);
 
-      const int64_t imm = *pCodePtr;
+      const int64_t imm = *(int64_t *)pCodePtr;
       pCodePtr += sizeof(int64_t);
 
       LOG_I64(imm);
@@ -928,6 +928,124 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_MULI_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MULI_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      if (target_register < 8)
+      {
+        const int64_t imm = *(int64_t *)pCodePtr;
+        pCodePtr += sizeof(int64_t);
+
+        LOG_I64(imm);
+
+        *(int64_t *)(&iregister[target_register]) *= imm;
+      }
+      else IF_LAST_OPT(target_register < 16)
+      {
+        const double imm = *(double *)pCodePtr;
+        pCodePtr += sizeof(double);
+
+        LOG_F64(imm);
+
+        fregister[target_register - 8] *= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_MULI_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MULI_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      if (source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] *= iregister[operand_register];
+      }
+      else IF_LAST_OPT(source_register < 16)
+      {
+        ASSERT(operand_register >= 8 && operand_register < 16);
+        fregister[source_register - 8] *= fregister[operand_register - 8];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_MULU_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MULU_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      IF_LAST_OPT(target_register < 8)
+      {
+        const uint64_t imm = *(uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
+
+        LOG_U64(imm);
+
+        iregister[target_register] *= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_MULU_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MULU_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] *= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_AND_IMM:
     {
       LOG_INSTRUCTION_NAME(LLS_OP_AND_IMM);
@@ -970,10 +1088,166 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_REGISTER(operand_register);
       LOG_END();
 
-      IF_LAST_OPT (source_register < 8)
+      IF_LAST_OPT(source_register < 8)
       {
         ASSERT(operand_register < 8);
         iregister[source_register] &= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_OR_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_OR_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] |= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_XOR_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_XOR_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] ^= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_LOGICAL_AND_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_LOGICAL_AND_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] == (iregister[source_register] && iregister[operand_register]) ? 1 : 0;
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_LOGICAL_OR_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_LOGICAL_OR_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] == (iregister[source_register] || iregister[operand_register]) ? 1 : 0;
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_BSL_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_BSL_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] = iregister[source_register] << iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_BSR_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_BSR_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] = iregister[source_register] >> iregister[operand_register];
       }
       ASSERT_NO_ELSE;
 
@@ -1029,13 +1303,65 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t operand_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(operand_register);
+      LOG_REGISTER(operand_register);
       LOG_END();
 
       IF_LAST_OPT(source_register < 8)
       {
         ASSERT(operand_register < 8);
         iregister[source_register] = (iregister[source_register] == iregister[operand_register]);
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_LT_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_LT_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] = (iregister[source_register] < iregister[operand_register]);
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_GT_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_GT_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+      {
+        ASSERT(operand_register < 8);
+        iregister[source_register] = (iregister[source_register] > iregister[operand_register]);
       }
       ASSERT_NO_ELSE;
 
@@ -1107,6 +1433,45 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_END();
 
       pCodePtr += value;
+
+      break;
+    }
+
+    case LLS_OP_CALL_INTERNAL_RELATIVE_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_CALL_INTERNAL_RELATIVE_IMM);
+
+      const int64_t value = *(const int64_t *)pCodePtr;
+      pCodePtr += sizeof(int64_t);
+
+      LOG_I64(value);
+      LOG_INFO_START();
+      LOG_X64(pCodePtr - pState->pCode);
+
+      ((uint64_t *)pStack)[0] = (uint64_t)pCodePtr;
+      pCodePtr += value;
+
+      LOG_STRING(" to ");
+      LOG_X64(pCodePtr - pState->pCode);
+      LOG_INFO_END();
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_RETURN_INTERNAL:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_RETURN_INTERNAL);
+
+      LOG_INFO_START();
+      LOG_X64(pCodePtr - pState->pCode);
+
+      pCodePtr = (lls_code_t *)(((uint64_t *)pStack)[0]);
+
+      LOG_STRING(" to ");
+      LOG_X64(pCodePtr - pState->pCode);
+      LOG_INFO_END();
+      LOG_END();
 
       break;
     }
