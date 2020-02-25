@@ -135,7 +135,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
   memset(iregister, 0, sizeof(iregister));
   memset(fregister, 0, sizeof(fregister));
 
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'x' to quit.\n\n");
+  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'x' to quit.\n\t'z' to debug break.\n\n");
 #endif
 
   while (1)
@@ -382,6 +382,10 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
         case 's':
           silent = ~silent;
+          break;
+
+        case 'z':
+          __debugbreak();
           break;
 
         case 'x':

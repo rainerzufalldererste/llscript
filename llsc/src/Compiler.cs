@@ -1302,7 +1302,7 @@ namespace llsc
 
     public static bool NextIs(this string s, int startIndex, string next)
     {
-      if (s.Length > startIndex + next.Length)
+      if (s.Length >= startIndex + next.Length)
       {
         for (int i = 0; i < next.Length; i++)
           if (s[startIndex + i] != next[i])
@@ -2098,7 +2098,7 @@ namespace llsc
             if (bytes == 8)
               instructions.Add(new LLI_MovRegisterToStackOffset(sourceValue.position.registerIndex, stackSize, targetPosition.stackOffsetForward));
             else
-              instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(sourceValue.position.registerIndex, stackSize, targetPosition.registerIndex, (int)bytes));
+              instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(sourceValue.position.registerIndex, stackSize, targetPosition.stackOffsetForward, (int)bytes));
 
             if (addReference)
               sourceValue.remainingReferences++;
@@ -3963,40 +3963,8 @@ namespace llsc
       // In case it's a recursive call: backup the parameter positions.
       var originalParameters = function.parameters;
       function.ResetRegisterPositions();
-
-      for (int i = arguments.Count - 1; i >= 0; i--)
-      {
-        if (function.returnType is ArrayCType || function.returnType is StructCType)
-          throw new NotImplementedException();
-
-        var targetPosition = function.parameters[i].value.position;
-        var sourceValue = arguments[i];
-        
-        byteCodeState.CopyValueToPositionWithCast(sourceValue, targetPosition, function.parameters[i].type, stackSize);
-
-        sourceValue.remainingReferences--;
-      }
-
-      if (function is CBuiltInFunction)
-      {
-        Position targetPosition = new Position() { inRegister = true, registerIndex = 0 };
-
-        byteCodeState.MoveValueToPosition(new CConstIntValue((function as CBuiltInFunction).builtinFunctionIndex, BuiltInCType.Types["u8"], file, line), targetPosition, stackSize, true);
-
-        if (!(function.returnType is VoidCType))
-        {
-          returnValue.hasPosition = true;
-          returnValue.position.inRegister = true;
-          returnValue.position.registerIndex = 0;
-        }
-
-        byteCodeState.instructions.Add(new LLI_CallBuiltInFunction_IDFromRegister_ResultToRegister(0, 0));
-        
-        byteCodeState.registers[0] = returnValue;
-
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(returnValue, stackSize, byteCodeState));
-      }
-      else
+      
+      // Backup Registers.
       {
         byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("Backup Register Values."));
 
@@ -4046,7 +4014,42 @@ namespace llsc
 
           byteCodeState.registers[i] = null;
         }
+      }
+
+      for (int i = arguments.Count - 1; i >= 0; i--)
+      {
+        if (function.returnType is ArrayCType || function.returnType is StructCType)
+          throw new NotImplementedException();
+
+        var targetPosition = function.parameters[i].value.position;
+        var sourceValue = arguments[i];
         
+        byteCodeState.CopyValueToPositionWithCast(sourceValue, targetPosition, function.parameters[i].type, stackSize);
+
+        sourceValue.remainingReferences--;
+      }
+
+      if (function is CBuiltInFunction)
+      {
+        Position targetPosition = new Position() { inRegister = true, registerIndex = 0 };
+
+        byteCodeState.MoveValueToPosition(new CConstIntValue((function as CBuiltInFunction).builtinFunctionIndex, BuiltInCType.Types["u8"], file, line), targetPosition, stackSize, true);
+
+        if (!(function.returnType is VoidCType))
+        {
+          returnValue.hasPosition = true;
+          returnValue.position.inRegister = true;
+          returnValue.position.registerIndex = 0;
+        }
+
+        byteCodeState.instructions.Add(new LLI_CallBuiltInFunction_IDFromRegister_ResultToRegister(0, 0));
+        
+        byteCodeState.registers[0] = returnValue;
+
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(returnValue, stackSize, byteCodeState));
+      }
+      else
+      {
         byteCodeState.instructions.Add(new LLI_CallFunctionAtRelativeImm(function.functionStartLabel));
 
         if (!(function.returnType is VoidCType))
