@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
+
+[assembly: AssemblyVersion("1.0.*")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
 
 namespace llsc
 {
@@ -4099,7 +4103,7 @@ namespace llsc
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
-        this.returnValue = new CValue(file, line, function.returnType, true, true);
+        this.returnValue = new CValue(file, line, function.returnType, true, true) { description = $"Return Value of call to function ptr \"{functionPtr}\"" };
       else if (!(function.returnType is VoidCType))
         throw new NotImplementedException();
       else
@@ -4238,13 +4242,15 @@ namespace llsc
         // Set Return Value.
         if (function.returnType is VoidCType)
         {
-          // do nothing.
+          byteCodeState.registers[returnValueRegister] = null;
         }
         else
         {
           returnValue.hasPosition = true;
           returnValue.position.inRegister = true;
           returnValue.position.registerIndex = returnValueRegister;
+
+          byteCodeState.registers[returnValueRegister] = returnValue;
         }
       }
       else
@@ -5762,7 +5768,7 @@ namespace llsc
     [STAThread]
     static void Main(string[] args)
     {
-      Console.WriteLine("llsc - LLS Bytecode Compiler\n");
+      Console.WriteLine($"llsc - LLS Bytecode Compiler (Build Version: {Assembly.GetExecutingAssembly().GetName().Version})\n");
 
       string outFileName = "bytecode.lls";
       IEnumerable<FileContents> files = null;
@@ -7783,18 +7789,24 @@ namespace llsc
 
           case NPseudoFunctionType.FromRegister:
             {
-              if (nodes.Count != 4 || !(nodes[2] is NIntegerValue))
-                Error($"Unexpected {nodes[2]} in {nodes[0]}.", nodes[2].file, nodes[2].line);
+              if (nodes.Count != 3 || !(nodes[1] is NIntegerValue))
+                Error($"Unexpected {nodes[1]} in {pseudoFunction}.", nodes[1].file, nodes[1].line);
 
-              var registerIndexNode = nodes[2] as NIntegerValue;
+              var registerIndexNode = nodes[1] as NIntegerValue;
 
               if (registerIndexNode.isForcefullyNegative || registerIndexNode.uint_value >= (ulong)(IntegerRegisters + FloatRegisters))
-                Error($"Invalid register index in {nodes[0]}: {nodes[2]}. Expected 0 .. {Compiler.IntegerRegisters + Compiler.FloatRegisters - 1}", nodes[2].file, nodes[2].line);
+                Error($"Invalid register index in {pseudoFunction}: {nodes[1]}. Expected 0 .. {Compiler.IntegerRegisters + Compiler.FloatRegisters - 1}", nodes[1].file, nodes[1].line);
+
+              CValue value = null;
 
               if (registerIndexNode.uint_value < (ulong)IntegerRegisters)
-                return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["u64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["u64"], true, true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
               else
-                return new CValue(nodes[2].file, nodes[2].line, BuiltInCType.Types["f64"], true, true) { description = $"from {nodes[2]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["f64"], true, true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+
+              scope.instructions.Add(new CInstruction_CustomAction(e => { e.registers[value.position.registerIndex] = value; }, nodes[1].file, nodes[1].line));
+
+              return value;
             }
 
           case NPseudoFunctionType.Line:

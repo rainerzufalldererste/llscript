@@ -2,10 +2,10 @@ ProjectName = "llscript_host"
 project(ProjectName)
 
   --Settings
-  kind "ConsoleApp"
+  kind "StaticLib"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
-  linkoptions { "/ENTRY:llshost_position_independent" }
+  dependson { llscript_asm }
   
   ignoredefaultlibraries { "msvcrt" }
   
@@ -17,8 +17,8 @@ project(ProjectName)
   includedirs { "src" }
 
   targetname(ProjectName)
-  targetdir "../builds/bin"
-  debugdir "../builds/bin"
+  targetdir "../builds/lib"
+  debugdir "../builds/lib"
   
 filter {}
 configuration {}

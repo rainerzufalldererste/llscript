@@ -5,13 +5,12 @@
 
 #include "llshost.h"
 
-uint64_t __lls__call_func(const uint64_t *pStack);
-
 int32_t main(const int32_t argc, const char **pArgv)
 {
   if (argc != 2)
   {
     puts("Invalid Parameter.\n\nUsage: llscript_dbg <Filename>");
+    puts("Build Time: " __TIMESTAMP__);
     return -1;
   }
 
@@ -49,10 +48,7 @@ int32_t main(const int32_t argc, const char **pArgv)
 
   fclose(pFile);
 
-#pragma warning(push)
-#pragma warning(disable: 4054)
-  llshost(pByteCode, (void *)&__lls__call_func);
-#pragma warning(pop)
+  llshost(pByteCode);
 
   puts("\n\nEnd Of Execution.\nPress any key to exit.");
   _getch();

@@ -1,20 +1,20 @@
-ProjectName = "llscript_dbg"
+ProjectName = "llscript_host_bin"
 project(ProjectName)
 
   --Settings
   kind "ConsoleApp"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
-  defines { "_CRT_SECURE_NO_WARNINGS", "LLS_DEBUG_MODE" }
   dependson { llscript_host }
+  
+  ignoredefaultlibraries { "msvcrt" }
   
   objdir "intermediate/obj"
 
-  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc", "../llscript_asm/src/*.asm", "../llscript_host/src/*.c" }
+  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc" }
   files { "project.lua" }
   
   includedirs { "src" }
-  includedirs { "../llscript_host/src" }
 
   targetname(ProjectName)
   targetdir "../builds/bin"
