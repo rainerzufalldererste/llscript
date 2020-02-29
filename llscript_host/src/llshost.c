@@ -11,7 +11,7 @@
 #pragma warning (push, 0)
 #include <winternl.h>
 
-#ifndef LLS_PERF_MODE
+#ifdef LLS_LOW_PERF_MODE
 #define ASSERT_NO_ELSE else { __debugbreak(); return; }
 #define IF_LAST_OPT(...) if (__VA_ARGS__)
 #define ASSERT(x) do { if (!(x)) { __debugbreak(); return; } } while (0)
@@ -114,7 +114,10 @@ __forceinline void CopyBytes(void *pTarget, const void *pSource, size_t bytes)
     ((uint8_t *)pTarget)[i] = ((const uint8_t *)pSource)[i];
 }
 
-__forceinline void llshost_EvaluateCode(llshost_state_t *pState)
+#ifndef LLS_DEBUG_MODE
+__forceinline
+#endif
+void llshost_EvaluateCode(llshost_state_t *pState)
 {
   uint8_t *pStack = pState->pStack;
   lls_code_t *pCodePtr = pState->pCode;
@@ -132,10 +135,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
   bool stepOut = false;
   uint64_t breakpoint = (uint64_t)-1;
 
-  memset(iregister, 0, sizeof(iregister));
-  memset(fregister, 0, sizeof(fregister));
-
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'x' to quit.\n\t'z' to debug break.\n\n");
+  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'q' to restart.\n\t'x' to quit.\n\t'z' to debug break.\n\n");
 #endif
 
   while (1)
@@ -381,7 +381,7 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         }
 
         case 's':
-          silent = ~silent;
+          silent = !silent;
           break;
 
         case 'z':
@@ -390,6 +390,13 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
 
         case 'x':
           return;
+
+        case 'q':
+          CopyBytes(iregister, pState->registerValues, sizeof(iregister));
+          CopyBytes(fregister, pState->registerValues + 8, sizeof(fregister));
+          pCodePtr = pState->pCode;
+          pStack = pState->pStack;
+          break;
 
         default:;
         }
@@ -1272,6 +1279,23 @@ __forceinline void llshost_EvaluateCode(llshost_state_t *pState)
         iregister[source_register] = -iregister[source_register];
       else IF_LAST_OPT(source_register < 16)
         fregister[source_register - 8] = -fregister[source_register - 8];
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_INV_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_INV_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < 8)
+        iregister[source_register] = ~iregister[source_register];
       ASSERT_NO_ELSE;
 
       break;

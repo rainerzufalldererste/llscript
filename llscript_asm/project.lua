@@ -2,10 +2,9 @@ ProjectName = "llscript_asm"
 project(ProjectName)
 
   --Settings
-  kind "ConsoleApp"
+  kind "StaticLib"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
-  linkoptions { "/ENTRY:__lls__call_func" }
   
   ignoredefaultlibraries { "msvcrt" }
   
@@ -17,8 +16,8 @@ project(ProjectName)
   includedirs { "src" }
 
   targetname(ProjectName)
-  targetdir "../builds/bin"
-  debugdir "../builds/bin"
+  targetdir "../builds/lib"
+  debugdir "../builds/lib"
   
 filter {}
 configuration {}

@@ -15,6 +15,7 @@ project(ProjectName)
   files { "project.lua" }
   
   includedirs { "src" }
+  linkoptions { "../builds/lib/llscript_asm.lib" }
 
   targetname(ProjectName)
   targetdir "../builds/lib"

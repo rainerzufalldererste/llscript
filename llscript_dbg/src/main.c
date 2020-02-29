@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <malloc.h>
+#include <string.h>
 
 #include <conio.h>
 
@@ -48,7 +49,12 @@ int32_t main(const int32_t argc, const char **pArgv)
 
   fclose(pFile);
 
-  llshost(pByteCode);
+  llshost_state_t state;
+  memset(&state, 0, sizeof(state));
+  
+  state.pCode = pByteCode;
+
+  llshost_from_state(&state);
 
   puts("\n\nEnd Of Execution.\nPress any key to exit.");
   _getch();

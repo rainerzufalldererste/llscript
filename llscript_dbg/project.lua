@@ -5,16 +5,17 @@ project(ProjectName)
   kind "ConsoleApp"
   language "C"
   flags { "StaticRuntime", "FatalWarnings" }
-  defines { "_CRT_SECURE_NO_WARNINGS", "LLS_DEBUG_MODE" }
+  defines { "_CRT_SECURE_NO_WARNINGS", "LLS_DEBUG_MODE", "LLS_LOW_PERF_MODE" }
   dependson { llscript_host }
   
   objdir "intermediate/obj"
 
-  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc", "../llscript_asm/src/*.asm", "../llscript_host/src/*.c" }
+  files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc", "../llscript_host/src/*.c" }
   files { "project.lua" }
   
   includedirs { "src" }
   includedirs { "../llscript_host/src" }
+  links { "../builds/lib/llscript_asm.lib" }
 
   targetname(ProjectName)
   targetdir "../builds/bin"

@@ -730,10 +730,8 @@ namespace llsc
             unchecked { return BitConverter.GetBytes((short)value.int_value); }
 
           case BuiltInTypes.u8:
-            unchecked { return BitConverter.GetBytes((byte)value.uint_value); }
-
           case BuiltInTypes.i8:
-            unchecked { return BitConverter.GetBytes((sbyte)value.int_value); }
+            unchecked { return new byte[] { (byte)value.uint_value }; }
 
           default:
             throw new Exception("Internal Compiler Error.");
@@ -2301,6 +2299,8 @@ namespace llsc
       Position position = Position.StackOffset(value.homeStackOffset);
 
       MoveValueToPosition(value, position, stackSize, false);
+
+      value.modifiedSinceLastHome = false;
     }
 
     public void CopyValueToPosition(CValue sourceValue, Position position, SharedValue<long> stackSize)
@@ -3344,6 +3344,24 @@ namespace llsc
     }
 
     public override string ToString() => $"{ByteCodeInstructions.LLS_OP_NEGATE_REGISTER} r:{register}";
+  }
+
+  public class LLI_InverseRegister : LLInstruction
+  {
+    int register;
+
+    public LLI_InverseRegister(int register) : base(1 + 1)
+    {
+      this.register = register;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_INV_REGISTER);
+      byteCode.Add((byte)register);
+    }
+
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_INV_REGISTER} r:{register}";
   }
 
   public class LLI_EqualsRegister : LLInstruction
@@ -4744,7 +4762,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -4825,7 +4843,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -4906,7 +4924,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5087,7 +5105,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5175,7 +5193,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5258,7 +5276,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5365,7 +5383,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5420,7 +5438,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5477,7 +5495,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5534,7 +5552,7 @@ namespace llsc
       if (!lvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
 
-      if (!lvalue.isInitialized)
+      if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
       int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
@@ -5557,6 +5575,102 @@ namespace llsc
         rvalue.remainingReferences--;
 
         byteCodeState.instructions.Add(new LLI_NotRegister(lvalueRegisterIndex));
+
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Inverse : CInstruction
+  {
+    CValue value;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_Inverse(CValue value, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
+        Compiler.Error($"Value of the operator have to be non-floating point. Given: '{value}'.", file, line);
+
+      this.value = value;
+      this.stackSize = stackSize;
+
+      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"~({value})" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!value.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {value}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
+
+      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      {
+        if (value is CNamedValue || value is CGlobalValueReference)
+        {
+          if (value is CNamedValue)
+            byteCodeState.MoveValueToHome(value as CNamedValue, stackSize);
+          else if (value is CGlobalValueReference)
+            throw new NotImplementedException();
+        }
+
+        byteCodeState.instructions.Add(new LLI_InverseRegister(lvalueRegisterIndex));
+
+        value.remainingReferences--;
+
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_LogicalNot : CInstruction
+  {
+    CValue value;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_LogicalNot(CValue value, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
+        Compiler.Error($"Value of the operator have to be non-floating point. Given: '{value}'.", file, line);
+
+      this.value = value;
+      this.stackSize = stackSize;
+
+      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"!({value})" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!value.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {value}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
+
+      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      {
+        if (value is CNamedValue || value is CGlobalValueReference)
+        {
+          if (value is CNamedValue)
+            byteCodeState.MoveValueToHome(value as CNamedValue, stackSize);
+          else if (value is CGlobalValueReference)
+            throw new NotImplementedException();
+        }
+
+        byteCodeState.instructions.Add(new LLI_NotRegister(lvalueRegisterIndex));
+
+        value.remainingReferences--;
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
@@ -6638,7 +6752,6 @@ namespace llsc
                 else if (nodes.NextIs(typeof(NComma)))
                 {
                   nodes.RemoveAt(0);
-                  break;
                 }
                 else
                 {
@@ -6669,6 +6782,83 @@ namespace llsc
             value.position.inRegister = false;
             value.position.stackOffsetForward = value.homeStackOffset;
           }
+        }
+        // Fixed size array.
+        else if (nodes.NextIs(typeof(NType), typeof(NName), typeof(NOperator), typeof(NOpenScope)) && ((nodes[0] as NType).type is ArrayCType && (nodes[2] as NOperator).operatorType == "="))
+        {
+          if (!(((nodes[0] as NType).type as ArrayCType).type is BuiltInCType))
+            Error($"Invalid Type '{((nodes[0] as NType).type as ArrayCType).type.ToString()}'. Fixed Size Array Initializers can only contain builtin types.", nodes[0].file, nodes[0].line);
+
+          var nameNode = nodes[1] as NName;
+          var startNode = nodes[0] as NType;
+          var arrayType = startNode.type as ArrayCType;
+          var builtinType = arrayType.type as BuiltInCType;
+
+          nodes.RemoveRange(0, 4);
+
+          var valueCount = 0;
+
+          List<byte> data = new List<byte>();
+
+          while (true)
+          {
+            if (nodes.Count == 0)
+            {
+              Error("Unexpected end of array definition.", startNode.file, startNode.line);
+            }
+            else if (nodes[0] is NIntegerValue)
+            {
+              valueCount++;
+
+              if (valueCount > arrayType.count)
+                Error($"Number of array values in initializer exceeds specified count ({arrayType.count}) for {nameNode}.", nodes[0].file, nodes[0].line);
+
+              data.AddRange(builtinType.GetAsBytes(nodes[0] as NIntegerValue));
+              nodes.RemoveAt(0);
+
+              if (nodes.Count == 0)
+              {
+                Error("Unexpected end of array definition.", startNode.file, startNode.line);
+              }
+              else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+              {
+                nodes.RemoveRange(0, 2);
+                break;
+              }
+              else if (nodes.NextIs(typeof(NComma)))
+              {
+                nodes.RemoveAt(0);
+              }
+              else
+              {
+                Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+              }
+            }
+            else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+            {
+              nodes.RemoveRange(0, 2);
+              break;
+            }
+            else
+            {
+              Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+            }
+          }
+
+          if (data.Count < arrayType.GetSize())
+            data.AddRange(new byte[arrayType.GetSize() - data.Count]);
+          
+          var value = new CNamedValue(nameNode, arrayType, false, true);
+          value.homeStackOffset = scope.maxRequiredStackSpace.Value;
+          value.hasStackOffset = true;
+          scope.maxRequiredStackSpace.Value += arrayType.GetSize();
+
+          scope.AddVariable(value);
+          scope.instructions.Add(new CInstruction_SetArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
+
+          value.hasPosition = true;
+          value.position.inRegister = false;
+          value.position.stackOffsetForward = value.homeStackOffset;
         }
         else if (nodes[0] is NIfKeyword)
         {
@@ -7294,9 +7484,36 @@ namespace llsc
           if (!new string[] { "~", "!" }.Contains(operatorNode.operatorType)) // TODO: How will we implement 'negate'?
             Error($"Unexpected {operatorNode} in rvalue.", operatorNode.file, operatorNode.line);
 
-          //value.remainingReferences++;
+          var value = GetRValue(scope, nodes.GetRange(1, nodes.Count - 1), ref byteCodeState);
 
-          throw new NotImplementedException();
+          value.remainingReferences++;
+          
+          switch (operatorNode.operatorType)
+          {
+            case "~":
+              {
+                CValue resultingValue;
+
+                scope.instructions.Add(new CInstruction_Inverse(value, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            case "!":
+              {
+                CValue resultingValue;
+
+                scope.instructions.Add(new CInstruction_LogicalNot(value, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            default:
+              {
+                Error($"Unexpected {operatorNode} in rvalue.", operatorNode.file, operatorNode.line);
+                return null; // Unreachable.
+              }
+          }
         }
         else
         {
