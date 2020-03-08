@@ -1180,7 +1180,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       IF_LAST_OPT(source_register < 8)
       {
         ASSERT(operand_register < 8);
-        iregister[source_register] == (iregister[source_register] && iregister[operand_register]) ? 1 : 0;
+        iregister[source_register] = (iregister[source_register] && iregister[operand_register]) ? 1 : 0;
       }
       ASSERT_NO_ELSE;
 
@@ -1206,7 +1206,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       IF_LAST_OPT(source_register < 8)
       {
         ASSERT(operand_register < 8);
-        iregister[source_register] == (iregister[source_register] || iregister[operand_register]) ? 1 : 0;
+        iregister[source_register] = (iregister[source_register] || iregister[operand_register]) ? 1 : 0;
       }
       ASSERT_NO_ELSE;
 

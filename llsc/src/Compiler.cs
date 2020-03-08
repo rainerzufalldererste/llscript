@@ -7027,12 +7027,17 @@ namespace llsc
         }
         else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenParanthesis), typeof(NName), typeof(NComma), typeof(NIntegerValue), typeof(NCloseParanthesis), typeof(NLineEnd)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.ToRegister)
         {
-          scope.instructions.Add(new CInstruction_CustomAction(b => { b.MoveValueToPosition(scope.GetVariable((nodes[2] as NName).name), Position.Register((int)(nodes[4] as NIntegerValue).uint_value), scope.maxRequiredStackSpace, false); }, nodes[0].file, nodes[0].line));
+          var nameNode = nodes[2] as NName;
+          var indexNode = nodes[4] as NIntegerValue;
+          scope.instructions.Add(new CInstruction_CustomAction(b => {
+            b.CopyValueToPosition(scope.GetVariable(nameNode.name), Position.Register((int)indexNode.uint_value), scope.maxRequiredStackSpace);
+          }, nameNode.file, nameNode.line));
           nodes.RemoveRange(0, 7);
         }
         else if (nodes.NextIs(typeof(NPseudoFunction), typeof(NOpenParanthesis), typeof(NCloseParanthesis), typeof(NLineEnd)) && (nodes[0] as NPseudoFunction).type == NPseudoFunctionType.Exit)
         {
-          scope.instructions.Add(new CInstruction_CustomAction(b => { b.instructions.Add(new LLI_Exit()); }, nodes[0].file, nodes[0].line));
+          var exitNode = nodes[0] as NPseudoFunction;
+          scope.instructions.Add(new CInstruction_CustomAction(b => { b.instructions.Add(new LLI_Exit()); }, exitNode.file, exitNode.line));
           nodes.RemoveRange(0, 4);
 
           if (nodes.Count != 0)
