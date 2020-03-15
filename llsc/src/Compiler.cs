@@ -1871,7 +1871,9 @@ namespace llsc
       else
       {
         instructions.Add(new LLI_MovRegisterToRegister(register, triviallyFreeRegister));
-        
+
+        registers[register].position = Position.Register(triviallyFreeRegister);
+
         registers[triviallyFreeRegister] = registers[register];
         registers[register] = null;
       }
@@ -4199,6 +4201,8 @@ namespace llsc
           if (byteCodeState.registers[functionPtr.position.registerIndex] != functionPtr)
             throw new Exception("Internal Compiler Error!");
 
+          byteCodeState.FreeRegister(returnValueRegister, stackSize);
+          byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(functionPtr, stackSize, byteCodeState));
           byteCodeState.instructions.Add(new LLI_PushRegister((byte)functionPtr.position.registerIndex));
           pushedBytes += 8;
         }
@@ -4229,7 +4233,7 @@ namespace llsc
         }
 
         byteCodeState.instructions.Add(new LLI_StackDecrementImm(pushedBytes));
-        
+
         // Push Arguments to the Stack.
         for (int i = function.parameters.Length - 1; i >= 0; i--)
         {
