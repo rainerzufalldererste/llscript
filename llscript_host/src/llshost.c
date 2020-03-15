@@ -21,6 +21,8 @@
 #define ASSERT(x)
 #endif
 
+#define LLS_NOT_POSITION_INDEPENDENT
+
 #ifdef LLS_DEBUG_MODE
 // Debug Mode Is NOT POSITION INDEPENDENT!
 #include <stdio.h>
@@ -114,7 +116,7 @@ __forceinline void CopyBytes(void *pTarget, const void *pSource, size_t bytes)
     ((uint8_t *)pTarget)[i] = ((const uint8_t *)pSource)[i];
 }
 
-#ifndef LLS_DEBUG_MODE
+#if !defined(LLS_DEBUG_MODE) && !defined(LLS_NOT_POSITION_INDEPENDENT)
 __forceinline
 #endif
 void llshost_EvaluateCode(llshost_state_t *pState)

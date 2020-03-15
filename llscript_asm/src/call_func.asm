@@ -50,7 +50,12 @@ dq 9090909090909090H ; more nops.
 ;
 __lls__call_func:
 ; Reserve Stack Space.
-sub rsp, 56
+push rbp
+push rbx
+push rdi
+push rsi
+sub rsp, 128
+
 
 ; Move script stack ptr to rax.
 mov rax, rcx
@@ -176,7 +181,11 @@ mov rax, qword ptr [rsp]
 
 end_func:
 ; Free Stack Space.
-add rsp, 56
+add rsp, 128
+pop rsi
+pop rdi
+pop rbx
+pop rbp
 
 ; return.
 ret
