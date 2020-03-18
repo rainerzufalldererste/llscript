@@ -137,7 +137,7 @@ after_param4:
 ; move to next param.
 sub rax, 8
 
-
+mov rsi, rsp
 
 ; Remaining Params
 remaining_params:
@@ -181,6 +181,7 @@ mov rax, qword ptr [rsp]
 
 end_func:
 ; Free Stack Space.
+mov rsp, rsi
 add rsp, 128
 pop rsi
 pop rdi
