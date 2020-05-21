@@ -1875,7 +1875,7 @@ __forceinline void llshost_Setup(llshost_state_t *pState)
 
 __forceinline void llshost_Cleanup(llshost_state_t *pState)
 {
-  if (pState->pHeapHandle != NULL)
+  if (pState->pHeapHandle == NULL)
     return;
 
   if (pState->pHeapFree != NULL && pState->pStack != NULL)
