@@ -43,8 +43,11 @@ typedef struct
 // This function will look for `LLS_CODE_START_PATTERN` after the function.
 void llshost_position_independent();
 
-void llshost(void *pCodePtr);
-void llshost_from_state(llshost_state_t *pState);
+// Returns 0 on Error (code pointer is null or stack memory allocation failure).
+uint8_t llshost(void *pCodePtr);
+
+// Returns 0 on Error (code pointer is null or stack memory allocation failure).
+uint8_t llshost_from_state(llshost_state_t *pState);
 
 #define LLS_CODE_START_PATTERN (0x31719E1203636F37)
 #define LLS_DEFUALT_STACK_SIZE (0x1000000) // 16 MB
