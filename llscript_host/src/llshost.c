@@ -1933,7 +1933,7 @@ void llshost_position_independent()
 
 uint64_t __lls__call_func(const uint64_t *pStack);
 
-void llshost(void *pCodePtr)
+uint8_t llshost(void *pCodePtr)
 {
   llshost_state_t state;
 
@@ -1946,12 +1946,17 @@ void llshost(void *pCodePtr)
   state.pCallFuncShellcode = (const void *)__lls__call_func;
 #pragma warning(pop)
 
+  if (state.pStack == NULL || state.pCode == NULL)
+    return 0;
+
   llshost_Setup(&state);
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
+
+  return 1;
 }
 
-void llshost_from_state(llshost_state_t *pState)
+uint8_t llshost_from_state(llshost_state_t *pState)
 {
   if (pState->pCallFuncShellcode == NULL)
 #pragma warning(push)
@@ -1960,6 +1965,12 @@ void llshost_from_state(llshost_state_t *pState)
 #pragma warning(pop)
 
   llshost_Setup(pState);
+
+  if (pState->pStack == NULL || pState->pCode == NULL)
+    return 0;
+
   llshost_EvaluateCode(pState);
   llshost_Cleanup(pState);
+
+  return 1;
 }

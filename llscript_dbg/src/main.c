@@ -54,6 +54,11 @@ int32_t main(const int32_t argc, const char **pArgv)
   
   state.pCode = pByteCode;
 
+  static uint8_t stack[LLS_DEFUALT_STACK_SIZE];
+  memset(stack, 0, sizeof(stack));
+  state.pStack = stack;
+  state.stackSize = sizeof(stack);
+
   llshost_from_state(&state);
 
   puts("\n\nEnd Of Execution.\nPress any key to exit.");
