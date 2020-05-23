@@ -50,6 +50,6 @@ uint8_t llshost(void *pCodePtr);
 uint8_t llshost_from_state(llshost_state_t *pState);
 
 #define LLS_CODE_START_PATTERN (0x31719E1203636F37)
-#define LLS_DEFUALT_STACK_SIZE (0x1000000) // 16 MB
+#define LLS_DEFUALT_STACK_SIZE (0x6000) // 24 KB
 
 #endif // llshost_h__

@@ -1946,10 +1946,11 @@ uint8_t llshost(void *pCodePtr)
   state.pCallFuncShellcode = (const void *)__lls__call_func;
 #pragma warning(pop)
 
+  llshost_Setup(&state);
+
   if (state.pStack == NULL || state.pCode == NULL)
     return 0;
 
-  llshost_Setup(&state);
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
 
