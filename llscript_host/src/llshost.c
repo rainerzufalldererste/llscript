@@ -1950,6 +1950,10 @@ uint8_t llshost(void *pCodePtr)
     return 0;
 
   llshost_Setup(&state);
+
+  if (state.pStack == NULL || state.pCode == NULL)
+    return 0;
+
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
 
