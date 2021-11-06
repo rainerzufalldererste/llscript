@@ -4,7 +4,8 @@ project(ProjectName)
   --Settings
   kind "ConsoleApp"
   language "C"
-  flags { "StaticRuntime", "FatalWarnings" }
+  flags { "FatalWarnings" }
+  staticruntime "On"
   defines { "_CRT_SECURE_NO_WARNINGS" }
   
   objdir "intermediate/obj"
@@ -28,7 +29,9 @@ filter { }
   exceptionhandling "Off"
   rtti "Off"
   floatingpoint "Fast"
-	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
+	flags { "NoBufferSecurityCheck", "NoIncrementalLink" }
+  omitframepointer "On"
+  editandcontinue "Off"
 
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }
@@ -37,5 +40,4 @@ filter { "configurations:Debug*" }
 filter { "configurations:Release" }
 	defines { "NDEBUG" }
 	optimize "Speed"
-  editandcontinue "Off"
   symbols "On"

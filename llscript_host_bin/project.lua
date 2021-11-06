@@ -4,7 +4,8 @@ project(ProjectName)
   --Settings
   kind "ConsoleApp"
   language "C"
-  flags { "StaticRuntime", "FatalWarnings" }
+  flags { "FatalWarnings" }
+  staticruntime "On"
   dependson { llscript_host }
   
   ignoredefaultlibraries { "msvcrt" }
@@ -31,7 +32,8 @@ filter { }
   rtti "Off"
   floatingpoint "Fast"
   editandcontinue "Off"
-	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
+	flags { "NoBufferSecurityCheck", "NoIncrementalLink" }
+  omitframepointer "On"
 
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }

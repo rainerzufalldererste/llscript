@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -9,8 +9,9 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>llsc</RootNamespace>
     <AssemblyName>llsc</AssemblyName>
-    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <PlatformTarget>x64</PlatformTarget>
@@ -40,7 +41,21 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="project.lua" />
+    <Compile Include="src\ByteCodeState.cs" />
+    <Compile Include="src\CFunction.cs" />
+    <Compile Include="src\CInstruction.cs" />
+    <Compile Include="src\CType.cs" />
+    <Compile Include="src\CValue.cs" />
+    <Compile Include="src\CompileFailureException.cs" />
     <Compile Include="src\Compiler.cs" />
+    <Compile Include="src\FileContents.cs" />
+    <Compile Include="src\LLInstruction.cs" />
+    <Compile Include="src\Node.cs" />
+    <Compile Include="src\ParsingExtensions.cs" />
+    <Compile Include="src\Position.cs" />
+    <Compile Include="src\Scope.cs" />
+    <Compile Include="src\SharedValue.cs" />
+    <Compile Include="src\StructAttribute.cs" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>

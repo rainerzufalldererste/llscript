@@ -54,7 +54,7 @@ push rbp
 push rbx
 push rdi
 push rsi
-sub rsp, 128
+sub rsp, 120 ; this needs to be 16 bit aligned minus 8 (because `call` will push 8 bytes to the stack)
 
 
 ; Move script stack ptr to rax.
@@ -182,7 +182,7 @@ mov rax, qword ptr [rsp]
 end_func:
 ; Free Stack Space.
 mov rsp, rsi
-add rsp, 128
+add rsp, 120
 pop rsi
 pop rdi
 pop rbx

@@ -4,7 +4,8 @@ project(ProjectName)
   --Settings
   kind "StaticLib"
   language "C"
-  flags { "StaticRuntime", "FatalWarnings" }
+  flags { "FatalWarnings" }
+  staticruntime "On"
   
   ignoredefaultlibraries { "msvcrt" }
   
@@ -29,7 +30,8 @@ filter { }
   exceptionhandling "Off"
   rtti "Off"
   floatingpoint "Fast"
-	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
+	flags { "NoBufferSecurityCheck", "NoIncrementalLink" }
+  omitframepointer "On"
 
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }

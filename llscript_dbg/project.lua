@@ -4,9 +4,10 @@ project(ProjectName)
   --Settings
   kind "ConsoleApp"
   language "C"
-  flags { "StaticRuntime", "FatalWarnings" }
+  flags { "FatalWarnings" }
+  staticruntime "On"
   defines { "_CRT_SECURE_NO_WARNINGS", "LLS_DEBUG_MODE", "LLS_LOW_PERF_MODE" }
-  dependson { llscript_host }
+  dependson { llscript_host, llscript_asm }
   
   objdir "intermediate/obj"
 
@@ -32,7 +33,8 @@ filter { }
   rtti "Off"
   floatingpoint "Fast"
   editandcontinue "Off"
-	flags { "NoFramePointer", "NoBufferSecurityCheck", "NoIncrementalLink" }
+	flags { "NoBufferSecurityCheck", "NoIncrementalLink" }
+  omitframepointer "On"
 
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }

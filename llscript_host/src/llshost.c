@@ -1749,12 +1749,12 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   }
 }
 
-__forceinline void llshost_Setup(llshost_state_t *pState)
+#ifndef _DEBUG
+__forceinline
+#endif
+void llshost_Setup(llshost_state_t *pState)
 {
-  if (pState->pStack != NULL)
-    return;
-
-  if (pState->stackSize == 0)
+  if (pState->pStack == NULL && pState->stackSize == 0)
     pState->stackSize = LLS_DEFUALT_STACK_SIZE;
 
   // Load Process Environment Block.
@@ -1828,49 +1828,52 @@ __forceinline void llshost_Setup(llshost_state_t *pState)
   typedef HANDLE(*GetProcessHeapFunc)();
   GetProcessHeapFunc pGetProcessHeap = (GetProcessHeapFunc)pGetProcAddress(kernel32Dll, (const char *)&x.text0);
 
-  pState->pHeapHandle = pGetProcessHeap();
-
-  if (pState->pHeapHandle == NULL)
+  if (pState->pStack == NULL)
   {
-    // Get `HeapCreate`.
-    x.text0 = 0x6165724370616548; // `HeapCrea`
-    x.text1 = 0x0000000000006574; // `te\0\0\0\0\0\0`
+    pState->pHeapHandle = pGetProcessHeap();
 
-    typedef HANDLE(*HeapCreateFunc)(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize);
-    HeapCreateFunc pHeapCreate = (HeapCreateFunc)pGetProcAddress(kernel32Dll, (const char *)&x.text0);
+    if (pState->pHeapHandle == NULL)
+    {
+      // Get `HeapCreate`.
+      x.text0 = 0x6165724370616548; // `HeapCrea`
+      x.text1 = 0x0000000000006574; // `te\0\0\0\0\0\0`
 
-    pState->pHeapHandle = pHeapCreate(0, 0, 0);
+      typedef HANDLE(*HeapCreateFunc)(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize);
+      HeapCreateFunc pHeapCreate = (HeapCreateFunc)pGetProcAddress(kernel32Dll, (const char *)&x.text0);
 
-    // Get `HeapDestroy`.
-    x.text0 = 0x7473654470616548; // `HeapDest`
-    x.text1 = 0x0000000000796F72; // `roy\0\0\0\0\0`
+      pState->pHeapHandle = pHeapCreate(0, 0, 0);
 
-    pState->pHeapDestroy = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
+      // Get `HeapDestroy`.
+      x.text0 = 0x7473654470616548; // `HeapDest`
+      x.text1 = 0x0000000000796F72; // `roy\0\0\0\0\0`
+
+      pState->pHeapDestroy = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
+    }
+
+    // Get `HeapAlloc`.
+    x.text0 = 0x6F6C6C4170616548; // `HeapAllo`
+    x.text1 = 0x0000000000000063; // `c\0\0\0\0\0\0\0`
+
+    typedef LPVOID(*HeapAllocFunc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
+    HeapAllocFunc pHeapAlloc = pGetProcAddress(kernel32Dll, (const char *)&x.text0);;
+
+    pState->pHeapAlloc = pHeapAlloc;
+
+    // Get `HeapFree`.
+    x.text0 = 0x6565724670616548; // `HeapFree`
+    x.text1 = 0x0000000000000000; // `\0\0\0\0\0\0\0\0`
+
+    pState->pHeapFree = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
+
+    // Get `HeapReAlloc`.
+    x.text0 = 0x6C41655270616548; // `HeapReAl`
+    x.text1 = 0x0000000000636F6C; // `loc\0\0\0\0\0`
+
+    pState->pHeapRealloc = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
+
+    // Allocate Stack.
+    pState->pStack = pHeapAlloc(pState->pHeapHandle, 0, pState->stackSize);
   }
-
-  // Get `HeapAlloc`.
-  x.text0 = 0x6F6C6C4170616548; // `HeapAllo`
-  x.text1 = 0x0000000000000063; // `c\0\0\0\0\0\0\0`
-
-  typedef LPVOID (*HeapAllocFunc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
-  HeapAllocFunc pHeapAlloc = pGetProcAddress(kernel32Dll, (const char *)&x.text0);;
-
-  pState->pHeapAlloc = pHeapAlloc;
-
-  // Get `HeapFree`.
-  x.text0 = 0x6565724670616548; // `HeapFree`
-  x.text1 = 0x0000000000000000; // `\0\0\0\0\0\0\0\0`
-
-  pState->pHeapFree = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
-
-  // Get `HeapReAlloc`.
-  x.text0 = 0x6C41655270616548; // `HeapReAl`
-  x.text1 = 0x0000000000636F6C; // `loc\0\0\0\0\0`
-
-  pState->pHeapRealloc = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
-
-  // Allocate Stack.
-  pState->pStack = pHeapAlloc(pState->pHeapHandle, 0, pState->stackSize);
 }
 
 __forceinline void llshost_Cleanup(llshost_state_t *pState)
