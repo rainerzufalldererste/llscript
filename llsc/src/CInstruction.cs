@@ -252,7 +252,13 @@ namespace llsc
       this.stackSize = stackSize;
 
       if (!sourceValue.type.CanImplicitCastTo(targetValue.type))
+      {
+        if ((sourceValue is CConstIntValue) && (sourceValue as CConstIntValue).smallestPossibleSignedType != null && (sourceValue as CConstIntValue).smallestPossibleSignedType.CanImplicitCastTo(targetValue.type))
+          this.sourceValue = new CConstIntValue((sourceValue as CConstIntValue).uvalue, (sourceValue as CConstIntValue).smallestPossibleSignedType, sourceValue.file, sourceValue.line) { description = $"signed equivalient value of '{sourceValue}'" };
+
         Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned to '{targetValue}', because there is no implicit conversion available.", file, line);
+
+      }
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -730,9 +736,11 @@ namespace llsc
 
   public class CInstruction_AddressOfVariable : CInstruction
   {
-    CNamedValue value;
-    CGlobalValueReference outValue;
-    SharedValue<long> stackSize;
+    protected CNamedValue value;
+    protected CGlobalValueReference outValue;
+    protected SharedValue<long> stackSize;
+
+    protected CInstruction_AddressOfVariable(string file, int line) : base(file, line) { }
 
     public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
@@ -768,6 +776,19 @@ namespace llsc
 
       byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
       byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
+    }
+  }
+
+  public class CInstruction_ArrayVariableToPtr : CInstruction_AddressOfVariable
+  {
+    public CInstruction_ArrayVariableToPtr(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
+    {
+      if (!(value.type is ArrayCType))
+        Compiler.Error($"Parameter {nameof(value)} ({value}) to {nameof(CInstruction_ArrayVariableToPtr)} is not an array but {value.type}.", file, line);
+
+      this.value = value;
+      this.outValue = outValue = new CGlobalValueReference(new PtrCType((value.type as ArrayCType).type), file, line, false) { description = $"ptr to '{value}'" };
+      this.stackSize = stackSize;
     }
   }
 

@@ -40,7 +40,7 @@
 #define LOG_I64(x) do { if (!silent) printf("%" PRIi64 " (0x%" PRIX64 ")", (int64_t)(x), (int64_t)(x)); } while (0)
 #define LOG_F64(x) do { if (!silent) printf("%f", (double)(x)); } while (0)
 #define LOG_DELIMITER() do { if (!silent) fputs(", ", stdout); } while (0)
-#define LOG_DETAILS() do { if (!silent) fputs("\n\t\t// ", stdout); } while (0)
+#define LOG_DETAILS() do { if (!silent) fputs("\n :  : // ", stdout); } while (0)
 #define LOG_STRING(x) do { if (!silent) fputs((x), stdout); } while (0)
 #define LOG_INFO_START() do { if (!silent) fputs(" -> (", stdout); } while (0)
 #define LOG_INFO_END() do { if (!silent) fputs(")", stdout); } while (0)
@@ -71,28 +71,145 @@ __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pS
 
   if ((uint8_t *)param >= pState->pStack && (uint8_t *)param < pState->pStack + pState->stackSize)
   {
-    puts("\t\t// \tCould be stack pointer:");
+    puts(" :  : //  : Could be stack pointer:");
     possiblePointer = true;
   }
   else if (param > 0x00007FF000000000 && param < 0x00007FFFFFFFFFFF)
   {
-    puts("\t\t// \tCould be heap pointer.");
+    puts(" :  : //  : Could be heap pointer.");
   }
 
   if (possiblePointer)
   {
     const uint64_t value = *(const uint64_t *)param;
-    fputs("\t\t// \t", stdout);
+    fputs(" :  : //  : ", stdout);
 
     LOG_U64_AS_BYTES(value);
 
-    fputs("... \t", stdout);
+    fputs("...  : ", stdout);
 
     LOG_U64_AS_STRING(value);
 
     puts(" ...");
   }
 }
+
+void *pDebugDatabase = NULL;
+HANDLE stdOutHandle = NULL;
+
+typedef struct
+{
+  uint64_t instruction, startOffset;
+} DebugDatabaseEntryHeader;
+
+typedef struct
+{
+  uint64_t debugDatabaseVersion, entryCount;
+  DebugDatabaseEntryHeader entries[];
+} DebugDatabaseHeader;
+
+typedef struct
+{
+  uint64_t codeCount, commentCount, variableLocationCount;
+  uint64_t offsets[];
+} DebugDatabaseEntry;
+
+typedef enum
+{
+  DT_Other,
+  DT_U8,
+  DT_U16,
+  DT_U32,
+  DT_U64,
+  DT_I8,
+  DT_I16,
+  DT_I32,
+  DT_I64,
+  DT_F32,
+  DT_F64,
+  DT_U8Ptr,
+  DT_U16Ptr,
+  DT_U32Ptr,
+  DT_U64Ptr,
+  DT_I8Ptr,
+  DT_I16Ptr,
+  DT_I32Ptr,
+  DT_I64Ptr,
+  DT_F32Ptr,
+  DT_F64Ptr
+} DebugDatabaseVariableType;
+
+#pragma pack(1)
+typedef struct
+{
+  uint8_t type;
+  bool inRegister;
+  uint64_t position;
+  char name[];
+} DebugDatabaseVariableLocation;
+
+
+typedef enum
+{
+  CC_Black,
+  CC_DarkRed,
+  CC_DarkGreen,
+  CC_DarkYellow,
+  CC_DarkBlue,
+  CC_DarkMagenta,
+  CC_DarkCyan,
+  CC_BrightGray,
+  CC_DarkGray,
+  CC_BrightRed,
+  CC_BrightGreen,
+  CC_BrightYellow,
+  CC_BrightBlue,
+  CC_BrightMagenta,
+  CC_BrightCyan,
+  CC_White
+} ConsoleColour;
+
+inline WORD GetWindowsConsoleColourFromConsoleColour(const ConsoleColour colour)
+{
+  switch (colour & 0xF)
+  {
+  default:
+  case CC_Black: return 0;
+  case CC_DarkBlue: return 1;
+  case CC_DarkGreen: return 2;
+  case CC_DarkCyan: return 3;
+  case CC_DarkRed: return 4;
+  case CC_DarkMagenta: return 5;
+  case CC_DarkYellow: return 6;
+  case CC_BrightGray: return 7;
+  case CC_DarkGray: return 8;
+  case CC_BrightBlue: return 9;
+  case CC_BrightGreen: return 10;
+  case CC_BrightCyan: return 11;
+  case CC_BrightRed: return 12;
+  case CC_BrightMagenta: return 13;
+  case CC_BrightYellow: return 14;
+  case CC_White: return 15;
+  }
+}
+
+void SetConsoleColour(const ConsoleColour foregroundColour, const ConsoleColour backgroundColour)
+{
+  if (stdOutHandle)
+  {
+    const WORD fgColour = GetWindowsConsoleColourFromConsoleColour(foregroundColour);
+    const WORD bgColour = GetWindowsConsoleColourFromConsoleColour(backgroundColour);
+
+    SetConsoleTextAttribute(stdOutHandle, fgColour | (bgColour << 4));
+  }
+}
+
+void ResetConsoleColour()
+{
+  if (stdOutHandle)
+    SetConsoleTextAttribute(stdOutHandle, GetWindowsConsoleColourFromConsoleColour(CC_BrightGray) | (GetWindowsConsoleColourFromConsoleColour(CC_Black) << 8));
+}
+
 #else
 #define LOG_INSTRUCTION_NAME(x)
 #define LOG_ENUM(x)
@@ -137,20 +254,33 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   bool stepOut = false;
   uint64_t breakpoint = (uint64_t)-1;
 
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'q' to restart.\n\t'x' to quit.\n\t'z' to debug break.\n\n");
+  stdOutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+  if (stdOutHandle == INVALID_HANDLE_VALUE)
+    stdOutHandle = NULL;
+
+  SetConsoleColour(CC_DarkGray, CC_Black);
+
+  puts("llshost byte code interpreter.\n\n : 'c' to run / continue execution.\n : 'n' to step.\n : 'f' to step out.\n : 'b' to set the breakpoint\n : 'r' for registers\n : 'p' for stack bytes\n : 'y' for advanced stack bytes\n : 'i' to inspect a value\n : 'm' to modify a value\n : 's' toggle silent.\n : 'q' to restart.\n : 'x' to quit.\n : 'z' to debug break.\n\n");
+
+  ResetConsoleColour();
 #endif
 
   while (1)
   {
 #ifdef LLS_DEBUG_MODE
-    if (pCodePtr - pState->pCode == breakpoint)
+    const uint64_t address = pCodePtr - pState->pCode;
+
+    if (address == breakpoint)
     {
-      printf("\n\tBreakpoint Hit (0x%" PRIX64 ")!\n\n", breakpoint);
+      printf("\n : Breakpoint Hit (0x%" PRIX64 ")!\n\n", breakpoint);
       stepInstructions = true;
     }
 
     if (stepInstructions)
     {
+      SetConsoleColour(CC_DarkGray, CC_Black);
+
       while (1)
       {
         fputs(">> ", stdout);
@@ -180,16 +310,16 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           puts("Registers:");
           for (size_t i = 0; i < 8; i++)
           {
-            printf("\t% 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ") \t", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
+            printf(" : % 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")  : ", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
             LOG_U64_AS_STRING(iregister[i]);
             puts("");
             LOG_INSPECT_INTEGER(iregister[i], pState);
           }
 
           for (size_t i = 0; i < 8; i++)
-            printf("\t% 3" PRIu64 ": %d\n", i + 8, fregister[i]);
+            printf(" : % 3" PRIu64 ": %d\n", i + 8, fregister[i]);
 
-          printf("\tCMP: %" PRIu8 "\n", cmp);
+          printf(" : CMP: %" PRIu8 "\n", cmp);
           printf("\nStack Offset: %" PRIu64 "\n", (size_t)pStack - (size_t)pState->pStack);
           puts("");
           break;
@@ -219,7 +349,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
                 printf("%02" PRIX8 " ", pStackInspect[i + j]);
             }
 
-            fputs("\t", stdout);
+            fputs(" : ", stdout);
 
             for (size_t j = 0; j < 8; j++)
             {
@@ -264,7 +394,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             for (size_t j = 0; j < 8; j++)
               printf("%02" PRIX8 " ", pStackInspect[i + j]);
 
-            fputs("\t", stdout);
+            fputs(" : ", stdout);
 
             for (size_t j = 0; j < 8; j++)
             {
@@ -293,13 +423,13 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           uint64_t ivalue = *(uint64_t *)pValue;
 
           printf("\nValue at Stack Offset %" PRIi64 ":\n", offset);
-          printf("\t%" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ") \t", ivalue, *(int64_t *)&ivalue, ivalue);
+          printf(" : %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")  : ", ivalue, *(int64_t *)&ivalue, ivalue);
           LOG_U64_AS_BYTES(ivalue);
-          fputs("\t ", stdout);
+          fputs(" :  ", stdout);
           LOG_U64_AS_STRING(ivalue);
           puts("");
           LOG_INSPECT_INTEGER(ivalue, pState);
-          printf("\t%f / %f\n\n", *(double *)pValue, *(float *)pValue);
+          printf(" : %f / %f\n\n", *(double *)pValue, *(float *)pValue);
 
           break;
         }
@@ -406,6 +536,72 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
     continue_execution:
       ;
+
+      ResetConsoleColour();
+    }
+
+    DebugDatabaseEntry *pEntry = NULL;
+    size_t entryDataOffset = 0;
+
+    if (pDebugDatabase)
+    {
+      DebugDatabaseHeader *pHeader = pDebugDatabase;
+
+      if (pHeader->debugDatabaseVersion <= 0)
+      {
+        int64_t l = 0;
+        int64_t r = pHeader->entryCount - 1;
+
+        while (l <= r)
+        {
+          const int64_t i = (l + r) / 2;
+
+          if (pHeader->entries[i].instruction < address)
+          {
+            l = i + 1;
+          }
+          else if (pHeader->entries[i].instruction > address)
+          {
+            r = i - 1;
+          }
+          else
+          {
+            pEntry = (uint8_t *)pHeader + sizeof(DebugDatabaseHeader) + pHeader->entryCount * sizeof(DebugDatabaseEntryHeader) + pHeader->entries[i].startOffset;
+            break;
+          }
+        }
+      }
+
+      if (pEntry)
+      {
+        fputs("\r", stdout);
+        entryDataOffset = (pEntry->codeCount + pEntry->commentCount + pEntry->variableLocationCount) * sizeof(uint64_t) + sizeof(DebugDatabaseEntry);
+
+        if (pEntry->codeCount)
+        {
+          fflush(stdout);
+          SetConsoleColour(CC_BrightYellow, CC_Black);
+
+          for (size_t i = 0; i < pEntry->codeCount; i++)
+            fputs((char *)pEntry + entryDataOffset + pEntry->offsets[i], stdout);
+
+          ResetConsoleColour();
+        }
+
+        if (pEntry->commentCount)
+        {
+          fflush(stdout);
+          SetConsoleColour(CC_DarkGray, CC_Black);
+
+          for (size_t i = 0; i < pEntry->commentCount; i++)
+          {
+            fputs("\t\t", stdout);
+            puts((char *)pEntry + entryDataOffset + pEntry->offsets[pEntry->codeCount + i]);
+          }
+
+          ResetConsoleColour();
+        }
+      }
     }
 #endif
 
@@ -1531,7 +1727,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
           if (paramType == 0)
           {
-            puts("\t\t// End Of Parameters");
+            puts(" :  : // End Of Parameters");
             break;
           }
           else if (paramType == 1)
@@ -1539,7 +1735,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             const uint64_t param = *pFunctionCallParams;
             pFunctionCallParams--;
 
-            printf("\t\t// - Integer: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", param, (int64_t)param, param);
+            printf(" :  : // - Integer: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", param, (int64_t)param, param);
 
             LOG_INSPECT_INTEGER(param, pState);
           }
@@ -1548,11 +1744,11 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             const double param = *(const double *)pFunctionCallParams;
             pFunctionCallParams--;
 
-            printf("\t\t// - Float: %f (0x%" PRIX64 ")\n", param, *(const uint64_t *)&param);
+            printf(" :  : // - Float: %f (0x%" PRIX64 ")\n", param, *(const uint64_t *)&param);
           }
         }
 
-        fputs("\t\t// Return Type is ", stdout);
+        fputs(" :  : // Return Type is ", stdout);
 
         const uint64_t returnType = *pFunctionCallParams;
         pFunctionCallParams--;
@@ -1565,7 +1761,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         const uint64_t functionAddress = *pFunctionCallParams;
         pFunctionCallParams--;
 
-        printf("\t\t// Function Address: 0x%" PRIX64 ".\n", functionAddress);
+        printf(" :  : // Function Address: 0x%" PRIX64 ".\n", functionAddress);
       }
 #endif
 
@@ -1575,7 +1771,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         iregister[target_register] = result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", result, (int64_t)result, result);
+        printf(" :  : // Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", result, (int64_t)result, result);
 
         LOG_INSPECT_INTEGER(result, pState);
 #endif
@@ -1584,7 +1780,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         fregister[target_register - 8] = *(double *)&result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %f (0x%" PRIX64 ")\n", *(double *)result, result);
+        printf(" :  : // Return Value: %f (0x%" PRIX64 ")\n", *(double *)result, result);
 #endif
       }
       ASSERT_NO_ELSE;
@@ -1746,6 +1942,219 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_END();
       __debugbreak();
     }
+
+#ifdef LLS_DEBUG_MODE
+
+    if (pEntry && pEntry->variableLocationCount)
+    {
+      if (pEntry->variableLocationCount)
+      {
+        for (size_t i = 0; i < pEntry->variableLocationCount; i++)
+        {
+          fflush(stdout);
+          SetConsoleColour(CC_BrightMagenta, CC_Black);
+
+          DebugDatabaseVariableLocation *pVariableInfo = (uint8_t *)pEntry + entryDataOffset + pEntry->offsets[pEntry->codeCount + pEntry->commentCount + i];
+
+          fputs(pVariableInfo->name, stdout);
+
+          fflush(stdout);
+          SetConsoleColour(CC_DarkMagenta, CC_Black);
+
+          switch (pVariableInfo->type)
+          {
+          case DT_U8:
+          {
+            uint8_t value = pVariableInfo->inRegister ? (uint8_t)iregister[pVariableInfo->position] : *(uint8_t *)(pStack - pVariableInfo->position);
+            printf(" (u8) : %" PRIu8 " / %02" PRIX8 "\n", value, value);
+            break;
+          }
+          
+          case DT_I8:
+          {
+            int8_t value = pVariableInfo->inRegister ? (int8_t)iregister[pVariableInfo->position] : *(int8_t *)(pStack - pVariableInfo->position);
+            printf(" (i8) : %" PRIi8 " / %02" PRIX8 "\n", value, value);
+            break;
+          }
+
+          case DT_U16:
+          {
+            uint16_t value = pVariableInfo->inRegister ? (uint16_t)iregister[pVariableInfo->position] : *(uint16_t *)(pStack - pVariableInfo->position);
+            printf(" (u16) : %" PRIu16 " / %04" PRIX16 "\n", value, value);
+            break;
+          }
+          
+          case DT_I16:
+          {
+            int16_t value = pVariableInfo->inRegister ? (int16_t)iregister[pVariableInfo->position] : *(int16_t *)(pStack - pVariableInfo->position);
+            printf(" (i16) : %" PRIi16 " / %04" PRIX16 "\n", value, value);
+            break;
+          }
+
+          case DT_U32:
+          {
+            uint32_t value = pVariableInfo->inRegister ? (uint32_t)iregister[pVariableInfo->position] : *(uint32_t *)(pStack - pVariableInfo->position);
+            printf(" (u32) : %" PRIu32 " / %08" PRIX32 "\n", value, value);
+            break;
+          }
+          
+          case DT_I32:
+          {
+            int32_t value = pVariableInfo->inRegister ? (int32_t)iregister[pVariableInfo->position] : *(int32_t *)(pStack - pVariableInfo->position);
+            printf(" (i32) : %" PRIi32 " / %08" PRIX32 "\n", value, value);
+            break;
+          }
+
+          case DT_U64:
+          {
+            uint64_t value = pVariableInfo->inRegister ? (uint64_t)iregister[pVariableInfo->position] : *(uint64_t *)(pStack - pVariableInfo->position);
+            printf(" (u64) : %" PRIu64 " / %016" PRIX64 "\n", value, value);
+            break;
+          }
+          
+          case DT_I64:
+          {
+            int64_t value = pVariableInfo->inRegister ? (int64_t)iregister[pVariableInfo->position] : *(int64_t *)(pStack - pVariableInfo->position);
+            printf(" (i64) : %" PRIi64 " / %016" PRIX64 "\n", value, value);
+            break;
+          }
+
+          case DT_U8Ptr:
+          {
+            uint8_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (uint8_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<u8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
+              printf("%" PRIu8 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_I8Ptr:
+          {
+            int8_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (int8_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<i8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
+              printf("%" PRIi8 ", ", pValue[i]);
+
+            fputs("...\n --> ", stdout);
+
+            bool end = true;
+
+            for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
+            {
+              if (pValue[i] == 0)
+              {
+                end = false;
+                break;
+              }
+             
+              printf("%c", pValue[i]);
+            }
+
+            if (end)
+              puts("...");
+            else
+              puts("");
+
+            break;
+          }
+
+          case DT_U16Ptr:
+          {
+            uint16_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (uint16_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<u16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
+              printf("%" PRIu16 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_I16Ptr:
+          {
+            int16_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (int16_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<i16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
+              printf("%" PRIi16 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_U32Ptr:
+          {
+            uint32_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (uint32_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<u32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
+              printf("%" PRIu32 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_I32Ptr:
+          {
+            int32_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (int32_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<i32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
+              printf("%" PRIi32 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_U64Ptr:
+          {
+            uint64_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (uint64_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<u64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
+              printf("%" PRIu64 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          case DT_I64Ptr:
+          {
+            int64_t *pValue = pVariableInfo->inRegister ? iregister[pVariableInfo->position] : (int64_t *)(pStack - pVariableInfo->position);
+            printf(" (ptr<i64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
+
+            for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
+              printf("%" PRIi64 ", ", pValue[i]);
+
+            puts("...");
+
+            break;
+          }
+
+          default:
+          case DT_Other: 
+          {
+            fputs(" (Other)\n", stdout);
+            break;
+          }
+          }
+        }
+
+        ResetConsoleColour();
+      }
+    }
+  
+#endif
   }
 }
 

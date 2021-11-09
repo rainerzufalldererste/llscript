@@ -574,6 +574,30 @@ namespace llsc
           CopyValueToPosition(sourceValue, targetPosition, stackSize);
           throw new NotImplementedException();
         }
+        else if (!(sourceValue.type as BuiltInCType).IsFloat() && !(targetType as BuiltInCType).IsFloat())
+        {
+          ulong pattern = targetType.GetSize() >= sourceValue.type.GetSize() ? 0 : ~(((ulong)1 << (int)((targetType as BuiltInCType).GetSize())) - (ulong)1);
+
+          if (pattern == 0)
+          {
+            CopyValueToPosition(sourceValue, targetPosition, stackSize);
+          }
+          else
+          {
+            if (targetPosition.inRegister)
+            {
+              CopyValueToPosition(sourceValue, targetPosition, stackSize);
+              instructions.Add(new LLI_AndImm(targetPosition.registerIndex, BitConverter.GetBytes(pattern)));
+            }
+            else
+            {
+              var tempPosition = Position.Register(GetFreeIntegerRegister(stackSize));
+              CopyValueToPosition(sourceValue, tempPosition, stackSize);
+              instructions.Add(new LLI_AndImm(targetPosition.registerIndex, BitConverter.GetBytes(pattern)));
+              CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, false, true), targetPosition, stackSize);
+            }
+          }
+        }
         else
         {
           throw new NotImplementedException();

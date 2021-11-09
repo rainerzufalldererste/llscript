@@ -6,48 +6,94 @@
 
 #include "llshost.h"
 
+#ifdef LLS_DEBUG_MODE
+extern void *pDebugDatabase;
+#endif
+
 int32_t main(const int32_t argc, const char **pArgv)
 {
-  if (argc != 2)
+  if (argc < 2)
   {
-    puts("Invalid Parameter.\n\nUsage: llscript_dbg <Filename>");
+    puts("Invalid Parameter.\n\nUsage: llscript_dbg <Filename> [<Debug Database Filename>]");
     puts("Build Time: " __TIMESTAMP__);
     return -1;
   }
 
-  FILE *pFile = fopen(pArgv[1], "rb");
+  uint8_t *pByteCode = NULL;
 
-  if (pFile == NULL)
+  // Read Bytecode from file.
   {
-    fputs("Failed to open file.", stderr);
-    return -1;
+    FILE *pFile = fopen(pArgv[1], "rb");
+
+    if (pFile == NULL)
+    {
+      fputs("Failed to open file.", stderr);
+      return -1;
+    }
+
+    fseek(pFile, 0, SEEK_END);
+    const int64_t fileSize = _ftelli64(pFile);
+    fseek(pFile, 0, SEEK_SET);
+
+    if (fileSize <= 0)
+    {
+      fputs("Invalid File.", stderr);
+      return -1;
+    }
+
+    pByteCode = (uint8_t *)malloc(fileSize);
+
+    if (pByteCode == NULL)
+    {
+      fputs("Memory Allocation Failure.", stderr);
+      return -1;
+    }
+
+    if ((size_t)fileSize != fread(pByteCode, 1, (size_t)fileSize, pFile))
+    {
+      fputs("Failed to read file.", stderr);
+      return -1;
+    }
+
+    fclose(pFile);
   }
 
-  fseek(pFile, 0, SEEK_END);
-  const int64_t fileSize = _ftelli64(pFile);
-  fseek(pFile, 0, SEEK_SET);
-
-  if (fileSize <= 0)
+  if (argc == 3)
   {
-    fputs("Invalid File.", stderr);
-    return -1;
+    FILE *pFile = fopen(pArgv[2], "rb");
+
+    if (pFile == NULL)
+    {
+      fputs("Failed to open debug database.", stderr);
+      return -1;
+    }
+
+    fseek(pFile, 0, SEEK_END);
+    const int64_t fileSize = _ftelli64(pFile);
+    fseek(pFile, 0, SEEK_SET);
+
+    if (fileSize <= 0)
+    {
+      fputs("Invalid Debug Database.", stderr);
+      return -1;
+    }
+
+    pDebugDatabase = malloc(fileSize);
+
+    if (pDebugDatabase == NULL)
+    {
+      fputs("Memory Allocation Failure.", stderr);
+      return -1;
+    }
+
+    if ((size_t)fileSize != fread(pDebugDatabase, 1, (size_t)fileSize, pFile))
+    {
+      fputs("Failed to read debug database.", stderr);
+      return -1;
+    }
+
+    fclose(pFile);
   }
-
-  uint8_t *pByteCode = (uint8_t *)malloc(fileSize);
-
-  if (pByteCode == NULL)
-  {
-    fputs("Memory Allocation Failure.", stderr);
-    return -1;
-  }
-
-  if ((size_t)fileSize != fread(pByteCode, 1, (size_t)fileSize, pFile))
-  {
-    fputs("Failed to read file.", stderr);
-    return -1;
-  }
-
-  fclose(pFile);
 
   llshost_state_t state;
   memset(&state, 0, sizeof(state));

@@ -150,22 +150,14 @@ namespace llsc
 
   public class LLI_Location_PseudoInstruction : LLI_PseudoInstruction
   {
-    public string name;
-    public Position location;
-    public SharedValue<long> stackSize;
+    public DbgLocationInfo locationInfo { get; protected set; }
 
     public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize, ByteCodeState byteCodeState) : base(0)
     {
       if (!value.hasPosition)
         throw new Exception("Internal Compiler Error!");
 
-      if (value is CNamedValue)
-        name = (value as CNamedValue).name;
-      else
-        name = "(" + value.ToString() + ")";
-
-      location = value.position;
-      this.stackSize = stackSize;
+      locationInfo = new DbgLocationInfo(value, stackSize);
 
       if (value.position.inRegister && byteCodeState.registers[value.position.registerIndex] != value)
         throw new Exception("Internal Compiler Error: Value not available in specified register.");
@@ -173,7 +165,7 @@ namespace llsc
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
 
-    public override string ToString() => $"# Value Location: '{name}' " + (location.inRegister ? $"r:{ location.registerIndex }" : $"s:{stackSize.Value - location.stackOffsetForward}");
+    public override string ToString() => $"# Value Location: '{(locationInfo.isVariable ? "(" : "") + locationInfo.name + (locationInfo.isVariable ? ")" : "")}' " + (locationInfo.position.inRegister ? $"r:{ locationInfo.position.registerIndex }" : $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}");
   }
 
   public class LLI_JumpToLabel : LLInstruction

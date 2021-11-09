@@ -77,6 +77,8 @@ namespace llsc
 
     public long ivalue { get; protected set; }
 
+    public CType smallestPossibleSignedType { get; protected set; } = null;
+
     protected CConstIntValue() : base() { }
 
     public CConstIntValue(ulong value, CType type, string file, int line) : base(file, line, type, true, true)
@@ -132,6 +134,52 @@ namespace llsc
       ivalue = value.int_value;
     }
 
+    public CConstIntValue(NIntegerValue value) : base()
+    {
+      BuiltInCType _type = null;
+
+      if (value.isForcefullyNegative)
+      {
+        if (value.int_value >= (long)sbyte.MinValue)
+          smallestPossibleSignedType = _type = BuiltInCType.Types["i8"];
+        else if (value.int_value >= (long)short.MinValue)
+          smallestPossibleSignedType = _type = BuiltInCType.Types["i16"];
+        else if (value.int_value >= (long)int.MinValue)
+          smallestPossibleSignedType = _type = BuiltInCType.Types["i32"];
+        else
+          smallestPossibleSignedType = _type = BuiltInCType.Types["i64"];
+      }
+      else
+      {
+        if (value.uint_value <= (ulong)byte.MaxValue)
+        {
+          _type = BuiltInCType.Types["u8"];
+          smallestPossibleSignedType = value.uint_value <= (ulong)byte.MaxValue ? BuiltInCType.Types["i8"] : BuiltInCType.Types["i16"];
+        }
+        else if (value.uint_value <= (ulong)ushort.MaxValue)
+        {
+          _type = BuiltInCType.Types["u16"];
+          smallestPossibleSignedType = value.uint_value <= (ulong)short.MaxValue ? BuiltInCType.Types["i16"] : BuiltInCType.Types["i32"];
+        }
+        else if (value.uint_value <= (ulong)uint.MaxValue)
+        {
+          _type = BuiltInCType.Types["u32"];
+          smallestPossibleSignedType = value.uint_value <= (ulong)int.MaxValue ? BuiltInCType.Types["i32"] : BuiltInCType.Types["i64"];
+        }
+        else
+        {
+          _type = BuiltInCType.Types["u64"];
+          smallestPossibleSignedType = value.uint_value <= (ulong)long.MaxValue ? BuiltInCType.Types["i64"] : null;
+        }
+      }
+
+      base.file = value.file;
+      base.line = value.line;
+      base.type = _type;
+      base.isConst = true;
+      base.isInitialized = true;
+    }
+
     public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
@@ -150,6 +198,7 @@ namespace llsc
 
       ret.uvalue = uvalue;
       ret.ivalue = ivalue;
+      ret.smallestPossibleSignedType = smallestPossibleSignedType;
 
       scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
 

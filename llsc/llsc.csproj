@@ -20,7 +20,8 @@
     <OutputPath>..\builds\bin\</OutputPath>
     <BaseIntermediateOutputPath>intermediate\obj\x64\Debug\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-    <DefineConstants></DefineConstants>
+    <DefineConstants>
+    </DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -32,7 +33,8 @@
     <OutputPath>..\builds\bin\</OutputPath>
     <BaseIntermediateOutputPath>intermediate\obj\x64\Release\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-    <DefineConstants></DefineConstants>
+    <DefineConstants>
+    </DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -48,6 +50,7 @@
     <Compile Include="src\CValue.cs" />
     <Compile Include="src\CompileFailureException.cs" />
     <Compile Include="src\Compiler.cs" />
+    <Compile Include="src\DbgHelp.cs" />
     <Compile Include="src\FileContents.cs" />
     <Compile Include="src\LLInstruction.cs" />
     <Compile Include="src\Node.cs" />

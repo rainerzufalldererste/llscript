@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 [assembly: AssemblyVersion("1.0.*")]
@@ -17,6 +18,7 @@ namespace llsc
 
     public static int OptimizationLevel { get; private set; } = 1;
     public static bool EmitAsm { get; private set; } = false;
+    public static bool EmitDbgDatabse { get; private set; } = false;
 
     public static bool DetailedIntermediateOutput { get; private set; } = false;
 
@@ -94,6 +96,10 @@ namespace llsc
               DetailedIntermediateOutput = true;
               break;
 
+            case "-dbgdb":
+              EmitDbgDatabse = true;
+              break;
+
             default:
               if (argument.StartsWith("-o="))
                 outFileName = argument.Substring(3).Trim('\'', '\"');
@@ -128,9 +134,8 @@ namespace llsc
 
         Console.WriteLine($"Parsing Succeeded. ({allNodes.Count} Nodes parsed from {files.Count()} Files)");
 
-        if (!EmitAsm)
+        if (!EmitAsm && !EmitDbgDatabse)
           files = null;
-
 
         CompileScope(globalScope, allNodes, ref byteCodeState);
         Console.WriteLine($"Instruction Generation Succeeded. ({byteCodeState.instructions.Count} Instructions & Pseudo-Instructions generated.)");
@@ -143,6 +148,9 @@ namespace llsc
 
         if (EmitAsm)
           WriteDisasm(outFileName, files, byteCodeState);
+
+        if (EmitDbgDatabse)
+          DbgDatabase.Write(outFileName, files, byteCodeState);
       }
       catch (CompileFailureException e)
       {
@@ -228,6 +236,7 @@ namespace llsc
       }
 
       File.WriteAllLines(outFileName + ".asm", lines);
+      Console.WriteLine($"Successfully wrote disasm to '{outFileName}.asm'.");
     }
 
     private static void Parse(FileContents file)
@@ -1275,6 +1284,9 @@ namespace llsc
           // Find first operator before ';'.
           int firstOperator = nodes.FindNextSameScope(n => n is NOperator || n is NLineEnd);
 
+          if (firstOperator < 0)
+            Error($"Failed to find operator. Unexpected token '{nodes[0]}'", nodes[0].file, nodes[0].line);
+
           if (nodes[firstOperator] is NLineEnd)
             firstOperator = -1;
 
@@ -1350,7 +1362,7 @@ namespace llsc
                 rvalue.description += " (rvalue)";
 
               if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
-                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
 
               var ptrValue = GetRValue(scope, paramNodes, ref byteCodeState);
 
@@ -1360,7 +1372,7 @@ namespace llsc
                 ptrValue.description += " (rvalue)";
 
               if (!(ptrValue.type is PtrCType))
-                Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", rnodes[0].file, rnodes[1].line);
+                Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", rnodes[0].file, rnodes[0].line);
 
               scope.instructions.Add(new CInstruction_SetValuePtrToValue(ptrValue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
             }
@@ -1377,8 +1389,17 @@ namespace llsc
               if (!(rvalue is CNamedValue))
                 rvalue.description += " (rvalue)";
 
-              if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
-                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+              if (rvalue.type is VoidCType)
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
+
+              if (rvalue.type is ArrayCType && rvalue is CNamedValue)
+              {
+                CGlobalValueReference addressOf;
+
+                scope.instructions.Add(new CInstruction_ArrayVariableToPtr((CNamedValue)rvalue, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
+
+                rvalue = addressOf;
+              }
 
               var lvalue = GetLValue(scope, lnodes, ref byteCodeState, rvalue.type);
               lvalue.remainingReferences++;
@@ -1422,7 +1443,16 @@ namespace llsc
           if (DetailedIntermediateOutput)
             byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction}"));
 
-          instruction.GetLLInstructions(ref byteCodeState);
+          try
+          {
+            instruction.GetLLInstructions(ref byteCodeState);
+          }
+          catch (Exception e)
+          {
+            Console.WriteLine($"Exception thrown on Instruction: {instruction}.");
+
+            ExceptionDispatchInfo.Capture(e).Throw();
+          }
         }
       }
       else
@@ -1710,7 +1740,7 @@ namespace llsc
             left.description += " (left rvalue)";
 
           if (left.type is VoidCType || left.type is ArrayCType)
-            Error($"Type '{left.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[1].line);
+            Error($"Type '{left.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
 
           var right = GetRValue(scope, rnodes, ref byteCodeState);
 
@@ -1971,6 +2001,8 @@ namespace llsc
             }
             else
             {
+              Error($"Unexpected Token {nodes[0]}.", nodes[0].file, nodes[0].line);
+
               // TODO: '.', '->'
               throw new NotImplementedException();
             }
@@ -2052,7 +2084,7 @@ namespace llsc
       }
       else if (nodes[0] is NIntegerValue && nodes.Count == 1)
       {
-        return new CConstIntValue(nodes[0] as NIntegerValue, BuiltInCType.Types["u64"]);
+        return new CConstIntValue(nodes[0] as NIntegerValue);
       }
       else if (nodes[0] is NFloatingPointValue && nodes.Count == 1)
       {
