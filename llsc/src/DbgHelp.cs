@@ -20,6 +20,7 @@ namespace llsc
     DT_I64,
     DT_F32,
     DT_F64,
+    DT_OtherPtr,
     DT_U8Ptr,
     DT_U16Ptr,
     DT_U32Ptr,
@@ -29,7 +30,18 @@ namespace llsc
     DT_I32Ptr,
     DT_I64Ptr,
     DT_F32Ptr,
-    DT_F64Ptr
+    DT_F64Ptr,
+    DT_OtherArray,
+    DT_U8Array,
+    DT_U16Array,
+    DT_U32Array,
+    DT_U64Array,
+    DT_I8Array,
+    DT_I16Array,
+    DT_I32Array,
+    DT_I64Array,
+    DT_F32Array,
+    DT_F64Array
   }
 
   public class DbgLocationInfo
@@ -58,13 +70,17 @@ namespace llsc
 
         if (type >= DbgType.DT_U8 && type <= DbgType.DT_F64)
           type = type + (DbgType.DT_U8Ptr - DbgType.DT_U8);
+        else
+          type = DbgType.DT_OtherPtr;
       }
       else if (value.type is ArrayCType)
       {
         type = DbgTypeHelper((value.type as ArrayCType).type);
 
         if (type >= DbgType.DT_U8 && type <= DbgType.DT_F64)
-          type = type + (DbgType.DT_U8Ptr - DbgType.DT_U8);
+          type = type + (DbgType.DT_U8Array - DbgType.DT_U8);
+        else
+          type = DbgType.DT_OtherArray;
       }
       else
       {
@@ -83,7 +99,7 @@ namespace llsc
       bytes.Add(position.inRegister ? (byte)1 : (byte)0);
 
       if (position.inRegister)
-        bytes.AddRange(BitConverter.GetBytes(position.inRegister ? (long)1 : (long)0));
+        bytes.AddRange(BitConverter.GetBytes((ulong)position.registerIndex));
       else
         bytes.AddRange(BitConverter.GetBytes(stackSize.Value - position.stackOffsetForward));
 
@@ -158,33 +174,83 @@ namespace llsc
     }
   }
 
+  public class DbgDatabaseEntry
+  {
+    public ulong offset;
+    public string line = "";
+    public List<string> comments = new List<string>();
+    public List<DbgLocationInfo> locationInfo = new List<DbgLocationInfo>();
+
+    public DbgDatabaseEntry(ulong offset)
+    {
+      this.offset = offset;
+    }
+
+    public List<byte> GetBytes()
+    {
+      if (!string.IsNullOrEmpty(line) || comments.Count != 0 || locationInfo.Count != 0)
+      {
+        List<byte> header = new List<byte>();
+        List<byte> contents = new List<byte>();
+
+        header.AddRange(BitConverter.GetBytes((ulong)(string.IsNullOrEmpty(line) ? 0 : 1)));
+        header.AddRange(BitConverter.GetBytes((ulong)comments.Count));
+        header.AddRange(BitConverter.GetBytes((ulong)locationInfo.Count));
+
+        if (!string.IsNullOrEmpty(line))
+        {
+          header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
+          contents.AddRange(Encoding.UTF8.GetBytes(line));
+          contents.Add(0);
+        }
+
+        foreach (var comment in comments)
+        {
+          header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
+          contents.AddRange(Encoding.UTF8.GetBytes(comment));
+          contents.Add(0);
+        }
+
+        foreach (var info in locationInfo)
+        {
+          header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
+          contents.AddRange(info.GetBytes());
+        }
+
+        header.AddRange(contents);
+
+        return header;
+      }
+
+      return null;
+    }
+  }
+
   public class DbgDatabase
   {
     public static void Write(string outFileName, IEnumerable<FileContents> files, ByteCodeState byteCodeState)
     {
-      List<Tuple<ulong, byte[]>> entries = new List<Tuple<ulong, byte[]>>();
+      List<DbgDatabaseEntry> entries = new List<DbgDatabaseEntry>();
+      DbgDatabaseEntry current = new DbgDatabaseEntry(0);
+      DbgDatabaseEntry last = current;
 
       string lastFile = null;
       int lastLine = -1;
       
-      string line = "";
-      List<string> comments = new List<string>();
-      List<DbgLocationInfo> locationInfo = new List<DbgLocationInfo>();
-
       foreach (var instruction in byteCodeState.instructions)
       {
-        if (instruction is LLI_Location_PseudoInstruction && (instruction as LLI_Location_PseudoInstruction).locationInfo.isVariable && (instruction as LLI_Location_PseudoInstruction).locationInfo.type != DbgType.DT_Other)
+        if (instruction is LLI_Location_PseudoInstruction /* && (instruction as LLI_Location_PseudoInstruction).locationInfo.isVariable && (instruction as LLI_Location_PseudoInstruction).locationInfo.type != DbgType.DT_Other */)
         {
           var info = (instruction as LLI_Location_PseudoInstruction).locationInfo;
 
           if (info != null)
-            locationInfo.Add(info);
+            last.locationInfo.Add(info);
 
           continue;
         }
         else if (instruction is LLI_PseudoInstruction)
         {
-          comments.Add(instruction.ToString());
+          current.comments.Add(instruction.ToString());
 
           continue;
         }
@@ -198,7 +264,7 @@ namespace llsc
           printedFile = true;
           lastFile = instruction.file;
           lastLine = -1;
-          line += "File: " + (lastFile == null ? "<compiler internal>" : lastFile);
+          current.line += "File: " + (lastFile == null ? "<compiler internal>" : lastFile);
         }
 
         if (lastLine != instruction.line)
@@ -212,47 +278,16 @@ namespace llsc
           var file = (from x in files where x.filename == lastFile select x.lines).FirstOrDefault();
 
           if (file != null && file.Length > lastLine && lastLine >= 0)
-            line += ((printedFile ? "\r\n" : "") + $"{lastLine + 1:   0}: {file[lastLine]}\r\n");
+            current.line += ((printedFile ? "\r\n" : "") + $"{lastLine + 1:   0}: {file[lastLine]}\r\n");
         }
 
         if (instruction.bytecodeSize != 0)
         {
-          if (!string.IsNullOrEmpty(line) || comments.Count != 0 || locationInfo.Count != 0)
-          {
-            List<byte> header = new List<byte>();
-            List<byte> contents = new List<byte>();
+          current.offset = instruction.position;
 
-            header.AddRange(BitConverter.GetBytes((ulong)(string.IsNullOrEmpty(line) ? 0 : 1)));
-            header.AddRange(BitConverter.GetBytes((ulong)comments.Count));
-            header.AddRange(BitConverter.GetBytes((ulong)locationInfo.Count));
-
-            if (!string.IsNullOrEmpty(line))
-            {
-              header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
-              contents.AddRange(Encoding.UTF8.GetBytes(line));
-              contents.Add(0);
-            }
-
-            foreach (var comment in comments)
-            {
-              header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
-              contents.AddRange(Encoding.UTF8.GetBytes(comment));
-              contents.Add(0);
-            }
-
-            foreach (var info in locationInfo)
-            {
-              header.AddRange(BitConverter.GetBytes((ulong)contents.Count));
-              contents.AddRange(info.GetBytes());
-            }
-
-            header.AddRange(contents);
-            entries.Add(Tuple.Create(instruction.position, header.ToArray()));
-
-            line = "";
-            comments = new List<string>();
-            locationInfo = new List<DbgLocationInfo>();
-          }
+          entries.Add(current);
+          last = current;
+          current = new DbgDatabaseEntry(instruction.position + instruction.bytecodeSize);
         }
       }
 
@@ -262,14 +297,28 @@ namespace llsc
         List<byte> body = new List<byte>();
 
         header.AddRange(BitConverter.GetBytes((ulong)0));
-        header.AddRange(BitConverter.GetBytes((ulong)entries.Count));
+
+        ulong count = 0;
 
         foreach (var entry in entries)
         {
-          body.AddRange(entry.Item2);
+          if (!string.IsNullOrEmpty(entry.line) || entry.comments.Count != 0 || entry.locationInfo.Count != 0)
+            count++;
+        }
 
-          header.AddRange(BitConverter.GetBytes(entry.Item1));
+        header.AddRange(BitConverter.GetBytes(count));
+
+        foreach (var entry in entries)
+        {
+          var bytes = entry.GetBytes();
+
+          if (bytes == null)
+            continue;
+
+          header.AddRange(BitConverter.GetBytes(entry.offset));
           header.AddRange(BitConverter.GetBytes((ulong)body.Count));
+
+          body.AddRange(bytes);
         }
 
         header.AddRange(body);

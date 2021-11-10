@@ -257,7 +257,6 @@ namespace llsc
           this.sourceValue = new CConstIntValue((sourceValue as CConstIntValue).uvalue, (sourceValue as CConstIntValue).smallestPossibleSignedType, sourceValue.file, sourceValue.line) { description = $"signed equivalient value of '{sourceValue}'" };
 
         Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned to '{targetValue}', because there is no implicit conversion available.", file, line);
-
       }
     }
 
@@ -269,6 +268,25 @@ namespace llsc
       if (!(sourceValue is CConstIntValue || sourceValue is CConstFloatValue))
         if (!sourceValue.hasPosition)
           throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
+
+      if (!(sourceValue is CNamedValue) && sourceValue.hasPosition && sourceValue.position.inRegister)
+      {
+        targetValue.hasPosition = true;
+        targetValue.position = sourceValue.position;
+
+        if (targetValue is CNamedValue && (targetValue as CNamedValue).hasStackOffset)
+          (targetValue as CNamedValue).modifiedSinceLastHome = true;
+
+        byteCodeState.registers[sourceValue.position.registerIndex] = targetValue;
+        sourceValue.hasPosition = false;
+        
+        if (sourceValue.type.GetSize() > targetValue.type.GetSize())
+          byteCodeState.TruncateRegister(sourceValue.position.registerIndex, targetValue.type.GetSize());
+
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
+        
+        return;
+      }
 
       if (!targetValue.hasPosition)
       {
@@ -1280,6 +1298,8 @@ namespace llsc
           resultingValue.position.inRegister = true;
           resultingValue.position.registerIndex = lvalueRegisterIndex;
         }
+
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(resultingValue, stackSize, byteCodeState));
       }
     }
   }

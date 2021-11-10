@@ -165,7 +165,7 @@ namespace llsc
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
 
-    public override string ToString() => $"# Value Location: '{(locationInfo.isVariable ? "(" : "") + locationInfo.name + (locationInfo.isVariable ? ")" : "")}' " + (locationInfo.position.inRegister ? $"r:{ locationInfo.position.registerIndex }" : $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}");
+    public override string ToString() => $"# Value Location: '{(!locationInfo.isVariable ? "(" : "") + locationInfo.name + (!locationInfo.isVariable ? ")" : "")}' " + (locationInfo.position.inRegister ? $"r:{ locationInfo.position.registerIndex }" : $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}");
   }
 
   public class LLI_JumpToLabel : LLInstruction

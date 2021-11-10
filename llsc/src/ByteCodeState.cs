@@ -315,6 +315,37 @@ namespace llsc
       }
     }
 
+    internal void TruncateValueInRegister(CValue value)
+    {
+      if (!(value.type is BuiltInCType))
+        throw new Exception($"Unexpected Type: Trying to truncate {value}. Exected builtin type.");
+
+      if (!value.hasPosition || !value.position.inRegister)
+        throw new Exception($"Unexpected Position for {value}.");
+
+      if ((value.type as BuiltInCType).IsFloat())
+        throw new NotImplementedException();
+
+      if (value.type.GetSize() >= 8)
+        return;
+
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Truncating Value '{value}' to {value.type.GetSize()} bytes."));
+
+      instructions.Add(new LLI_AndImm(value.position.registerIndex, BitConverter.GetBytes(((ulong)1 << (int)(value.type.GetSize() * 8)) - 1)));
+    }
+
+    internal void TruncateRegister(int registerIndex, long bytes)
+    {
+      if (bytes == 8)
+        return;
+
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Truncating Value in Register {registerIndex} to {bytes} bytes."));
+
+      instructions.Add(new LLI_AndImm(registerIndex, BitConverter.GetBytes(((ulong)1 << (int)(bytes * 8)) - 1)));
+    }
+
     public void CompileInstructionsToBytecode()
     {
       ulong position = 0;
@@ -344,6 +375,9 @@ namespace llsc
 
     public void MoveValueToPosition(CValue sourceValue, Position targetPosition, SharedValue<long> stackSize, bool addReference)
     {
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Moving Value '{sourceValue}' to {targetPosition}."));
+
       // TODO: Work out the reference count...
 
       if (targetPosition.inRegister && sourceValue.type.GetSize() > 8)
@@ -576,9 +610,7 @@ namespace llsc
         }
         else if (!(sourceValue.type as BuiltInCType).IsFloat() && !(targetType as BuiltInCType).IsFloat())
         {
-          ulong pattern = targetType.GetSize() >= sourceValue.type.GetSize() ? 0 : ~(((ulong)1 << (int)((targetType as BuiltInCType).GetSize())) - (ulong)1);
-
-          if (pattern == 0)
+          if (targetType.GetSize() >= sourceValue.type.GetSize())
           {
             CopyValueToPosition(sourceValue, targetPosition, stackSize);
           }
@@ -587,13 +619,13 @@ namespace llsc
             if (targetPosition.inRegister)
             {
               CopyValueToPosition(sourceValue, targetPosition, stackSize);
-              instructions.Add(new LLI_AndImm(targetPosition.registerIndex, BitConverter.GetBytes(pattern)));
+              TruncateRegister(targetPosition.registerIndex, targetType.GetSize());
             }
             else
             {
               var tempPosition = Position.Register(GetFreeIntegerRegister(stackSize));
               CopyValueToPosition(sourceValue, tempPosition, stackSize);
-              instructions.Add(new LLI_AndImm(targetPosition.registerIndex, BitConverter.GetBytes(pattern)));
+              TruncateRegister(tempPosition.registerIndex, targetType.GetSize());
               CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, false, true), targetPosition, stackSize);
             }
           }
@@ -611,6 +643,9 @@ namespace llsc
 
     internal byte MoveValueToAnyRegister(CValue value, SharedValue<long> stackSize)
     {
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Moving Value '{value}' to a register."));
+
       if (value is CConstIntValue)
       {
         int registerIndex = this.GetFreeIntegerRegister(stackSize);
@@ -656,14 +691,16 @@ namespace llsc
 
         var registerIndex = (!(value.type is BuiltInCType) || !(value.type as BuiltInCType).IsFloat()) ? GetFreeIntegerRegister(stackSize) : GetFreeFloatRegister(stackSize);
 
-        // TODO: Handle smaller types!
-
         instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, value.position.stackOffsetForward, (byte)registerIndex));
 
         registers[registerIndex] = value;
         value.position.inRegister = true;
         value.position.registerIndex = registerIndex;
-        
+
+        // Truncate smaller types.
+        if (value.type.GetSize() < 8)
+          TruncateValueInRegister(value);
+
         instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
 
         return (byte)registerIndex;
@@ -705,6 +742,9 @@ namespace llsc
 
     public void CopyValueToPosition(CValue sourceValue, Position position, SharedValue<long> stackSize)
     {
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Copying Value '{sourceValue}' to {position}."));
+
       var size = sourceValue.type.GetSize();
 
       if (sourceValue is CConstIntValue)

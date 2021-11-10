@@ -173,6 +173,11 @@ namespace llsc
         }
       }
 
+      if (!value.isForcefullyNegative)
+        uvalue = value.uint_value;
+
+      ivalue = value.int_value;
+
       base.file = value.file;
       base.line = value.line;
       base.type = _type;

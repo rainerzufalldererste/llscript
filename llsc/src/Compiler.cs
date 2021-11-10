@@ -1396,7 +1396,7 @@ namespace llsc
               {
                 CGlobalValueReference addressOf;
 
-                scope.instructions.Add(new CInstruction_ArrayVariableToPtr((CNamedValue)rvalue, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
+                scope.instructions.Add(new CInstruction_ArrayVariableToPtr((CNamedValue)rvalue, out addressOf, scope.maxRequiredStackSpace, equalsNode.file, equalsNode.line));
 
                 rvalue = addressOf;
               }
