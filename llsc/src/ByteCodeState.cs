@@ -828,5 +828,14 @@ namespace llsc
         }
       }
     }
+
+    public int CopyValueToAnyRegister(CValue value, SharedValue<long> stackSize)
+    {
+      int registerIndex = value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat() ? GetFreeFloatRegister(stackSize) : GetFreeIntegerRegister(stackSize);
+
+      CopyValueToPosition(value, Position.Register(registerIndex), stackSize);
+
+      return registerIndex;
+    }
   }
 }

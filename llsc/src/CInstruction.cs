@@ -269,10 +269,12 @@ namespace llsc
         if (!sourceValue.hasPosition)
           throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
 
+      // if setting the target to a temp value.
       if (!(sourceValue is CNamedValue) && sourceValue.hasPosition && sourceValue.position.inRegister)
       {
         targetValue.hasPosition = true;
         targetValue.position = sourceValue.position;
+        targetValue.isInitialized = true;
 
         if (targetValue is CNamedValue && (targetValue as CNamedValue).hasStackOffset)
           (targetValue as CNamedValue).modifiedSinceLastHome = true;
@@ -287,6 +289,22 @@ namespace llsc
         
         return;
       }
+      // This is too dangerous because I believe we don't properly keep track of references.
+      //// if setting the target to a named value that has no more references in the future (and is of the same size).
+      //else if (sourceValue is CNamedValue && sourceValue.hasPosition && sourceValue.remainingReferences == 0 && sourceValue.type.GetSize() == targetValue.type.GetSize())
+      //{
+      //  targetValue.hasPosition = true;
+      //  sourceValue.hasPosition = false;
+      //  
+      //  targetValue.position = sourceValue.position;
+      //
+      //  sourceValue.isInitialized = false;
+      //  targetValue.isInitialized = true;
+      //
+      //  (targetValue as CNamedValue).hasStackOffset = (sourceValue as CNamedValue).hasStackOffset;
+      //  (targetValue as CNamedValue).homeStackOffset = (sourceValue as CNamedValue).homeStackOffset;
+      //  (sourceValue as CNamedValue).hasStackOffset = false;
+      //}
 
       if (!targetValue.hasPosition)
       {
@@ -1126,6 +1144,9 @@ namespace llsc
       if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
         throw new Exception("Internal Compiler Error: Should not be float value.");
 
+      if (value.type is PtrCType && (value.type as PtrCType).pointsTo.GetSize() != 1)
+        imm *= (value.type as PtrCType).pointsTo.GetSize();
+
       this.value = value;
       this.imm = BitConverter.GetBytes(imm);
       this.stackSize = stackSize;
@@ -1144,6 +1165,9 @@ namespace llsc
       if (value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat())
         throw new Exception("Internal Compiler Error: Should not be float value.");
 
+      if (value.type is PtrCType && (value.type as PtrCType).pointsTo.GetSize() != 1)
+        imm *= (ulong)(value.type as PtrCType).pointsTo.GetSize();
+
       this.value = value;
       this.imm = BitConverter.GetBytes(imm);
       this.stackSize = stackSize;
@@ -1161,6 +1185,9 @@ namespace llsc
     {
       if (!(value.type is BuiltInCType) || !(value.type as BuiltInCType).IsFloat())
         throw new Exception("Internal Compiler Error: Should be float value.");
+
+      if (value.type is PtrCType)
+        Compiler.Error($"Unable to add floating point value {imm} to pointer {value}.", file, line);
 
       this.value = value;
       this.imm = BitConverter.GetBytes(imm);
@@ -1182,12 +1209,10 @@ namespace llsc
 
       int registerIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
 
-      if (!toSelf && (value is CNamedValue || value is CGlobalValueReference))
+      if (!toSelf && value is CNamedValue)
       {
         if (value is CNamedValue)
           byteCodeState.MoveValueToHome(value as CNamedValue, stackSize);
-        else if (value is CGlobalValueReference)
-          throw new NotImplementedException();
       }
 
       byteCodeState.instructions.Add(new LLI_AddImm(registerIndex, imm));
@@ -1213,34 +1238,37 @@ namespace llsc
 
   public class CInstruction_Add : CInstruction
   {
-    CValue lvalue, rvalue;
+    CValue left, right;
     SharedValue<long> stackSize;
     CValue resultingValue;
     bool toSelf;
 
-    public CInstruction_Add(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    public CInstruction_Add(CValue left, CValue right, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
     {
-      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) != (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
-        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+      if ((left.type is BuiltInCType && (left.type as BuiltInCType).IsFloat()) != (right.type is BuiltInCType && (right.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{left}' and '{right}'.", file, line);
 
-      this.lvalue = lvalue;
-      this.rvalue = rvalue;
+      this.left = left;
+      this.right = right;
       this.stackSize = stackSize;
       this.toSelf = toSelf;
 
       if (toSelf)
-        this.resultingValue = lvalue;
+        this.resultingValue = left;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} + {rvalue})" };
+        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, false, true) { description = $"({left} + {right})" };
 
-      if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
+      if ((left is CConstIntValue || left is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
 
-      if ((lvalue is CConstFloatValue && !(rvalue is CConstFloatValue)) || (lvalue is CConstIntValue && !(rvalue is CConstIntValue)))
+      if (left.type is PtrCType && right.type is BuiltInCType && (right.type as BuiltInCType).IsFloat())
+        Compiler.Error($"Attempting to add floating point value {right} to pointer {left}.", file, line);
+
+      if (!toSelf && (left is CConstFloatValue && !(right is CConstFloatValue)) || (left is CConstIntValue && !(right is CConstIntValue)))
       {
-        var tmp = lvalue;
-        lvalue = rvalue;
-        rvalue = tmp;
+        var tmp = left;
+        left = right;
+        right = tmp;
       }
 
       resultingValue = this.resultingValue;
@@ -1248,55 +1276,69 @@ namespace llsc
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
-      if (!lvalue.isInitialized)
-        Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
+      if (!left.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized value {left}.", file, line);
 
-      if (!rvalue.isInitialized)
-        Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
+      if (!right.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized value {right}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int leftRegisterIndex = byteCodeState.MoveValueToAnyRegister(left, stackSize);
 
-      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      using (var registerLock = byteCodeState.LockRegister(leftRegisterIndex))
       {
-        if (!toSelf && (lvalue is CNamedValue || lvalue is CGlobalValueReference))
+        if (!toSelf && left is CNamedValue)
         {
-          if (lvalue is CNamedValue)
-            byteCodeState.MoveValueToHome(lvalue as CNamedValue, stackSize);
-          else if (lvalue is CGlobalValueReference)
-            throw new NotImplementedException();
+          if (left is CNamedValue)
+            byteCodeState.MoveValueToHome(left as CNamedValue, stackSize);
         }
 
-        if (rvalue is CConstIntValue)
+        if (right is CConstIntValue)
         {
-          byteCodeState.instructions.Add(new LLI_AddImm(lvalueRegisterIndex, BitConverter.GetBytes((rvalue as CConstIntValue).uvalue)));
+          ulong imm = (right as CConstIntValue).uvalue;
+
+          if (left.type is PtrCType && (left.type as PtrCType).pointsTo.GetSize() > 1)
+            imm *= (ulong)(left.type as PtrCType).pointsTo.GetSize();
+
+          byteCodeState.instructions.Add(new LLI_AddImm(leftRegisterIndex, BitConverter.GetBytes(imm)));
         }
-        else if (rvalue is CConstFloatValue)
+        else if (right is CConstFloatValue)
         {
-          byteCodeState.instructions.Add(new LLI_AddImm(lvalueRegisterIndex, BitConverter.GetBytes((rvalue as CConstFloatValue).value)));
+          byteCodeState.instructions.Add(new LLI_AddImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstFloatValue).value)));
         }
         else
         {
-          int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+          int rightRegisterIndex;
 
-          byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+          if (left.type is PtrCType && right.type is BuiltInCType && (left.type as PtrCType).pointsTo.GetSize() != 1)
+          {
+            rightRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+
+            byteCodeState.instructions.Add(new LLI_MultiplySignedImm(rightRegisterIndex, BitConverter.GetBytes((left.type as PtrCType).pointsTo.GetSize())));
+          }
+          else
+          {
+            rightRegisterIndex = byteCodeState.MoveValueToAnyRegister(right, stackSize);
+          }
+
+          byteCodeState.instructions.Add(new LLI_AddRegister(leftRegisterIndex, rightRegisterIndex));
         }
 
-        lvalue.remainingReferences--;
-        rvalue.remainingReferences--;
+        left.remainingReferences--;
+        right.remainingReferences--;
 
         if (toSelf)
         {
-          if (lvalue is CNamedValue)
-            (lvalue as CNamedValue).modifiedSinceLastHome = true;
-          else if (lvalue is CGlobalValueReference)
+          if (left is CNamedValue)
+            (left as CNamedValue).modifiedSinceLastHome = true;
+          else if (left is CGlobalValueReference)
             throw new NotImplementedException();
         }
         else
         {
-          byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+          byteCodeState.registers[leftRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
           resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position.registerIndex = leftRegisterIndex;
         }
 
         byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(resultingValue, stackSize, byteCodeState));
@@ -1306,70 +1348,82 @@ namespace llsc
 
   public class CInstruction_Subtract : CInstruction
   {
-    CValue lvalue, rvalue;
+    CValue left, right;
     SharedValue<long> stackSize;
     CValue resultingValue;
     bool toSelf;
 
-    public CInstruction_Subtract(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
+    public CInstruction_Subtract(CValue left, CValue right, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
     {
-      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) != (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
-        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+      if ((left.type is BuiltInCType && (left.type as BuiltInCType).IsFloat()) != (right.type is BuiltInCType && (right.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be floating point or non-floating point. Given: '{left}' and '{right}'.", file, line);
 
-      this.lvalue = lvalue;
-      this.rvalue = rvalue;
+      this.left = left;
+      this.right = right;
       this.stackSize = stackSize;
       this.toSelf = toSelf;
 
       if (toSelf)
-        this.resultingValue = lvalue;
+        this.resultingValue = left;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} - {rvalue})" };
+        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, false, true) { description = $"({left} - {right})" };
 
       resultingValue = this.resultingValue;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
-      if (!lvalue.isInitialized)
-        Compiler.Error($"Cannot perform operator on uninitialized lvalue {lvalue}.", file, line);
+      if (!left.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized value {left}.", file, line);
 
-      if (!rvalue.isInitialized)
-        Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
+      if (!right.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized value {right}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int leftRegisterIndex = byteCodeState.MoveValueToAnyRegister(left, stackSize);
 
-      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      using (var registerLock = byteCodeState.LockRegister(leftRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+        int rightRegisterIndex;
 
-        if (!toSelf && (lvalue is CNamedValue || lvalue is CGlobalValueReference))
+        if (left.type is PtrCType && right.type is BuiltInCType && (left.type as PtrCType).pointsTo.GetSize() != 1)
         {
-          if (lvalue is CNamedValue)
-            byteCodeState.MoveValueToHome(lvalue as CNamedValue, stackSize);
-          else if (lvalue is CGlobalValueReference)
-            throw new NotImplementedException();
+          rightRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+
+          byteCodeState.instructions.Add(new LLI_MultiplySignedImm(rightRegisterIndex, BitConverter.GetBytes((left.type as PtrCType).pointsTo.GetSize())));
+        }
+        else
+        {
+          rightRegisterIndex = byteCodeState.MoveValueToAnyRegister(right, stackSize);
         }
 
-        byteCodeState.instructions.Add(new LLI_NegateRegister(rvalueRegisterIndex));
-        byteCodeState.instructions.Add(new LLI_AddRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+        if (!toSelf && left is CNamedValue)
+        {
+          if (left is CNamedValue)
+            byteCodeState.MoveValueToHome(left as CNamedValue, stackSize);
+        }
 
-        lvalue.remainingReferences--;
-        rvalue.remainingReferences--;
+        byteCodeState.instructions.Add(new LLI_NegateRegister(rightRegisterIndex));
+
+        if (right.type is PtrCType)
+
+        byteCodeState.instructions.Add(new LLI_AddRegister(leftRegisterIndex, rightRegisterIndex));
+
+        left.remainingReferences--;
+        right.remainingReferences--;
 
         if (toSelf)
         {
-          if (lvalue is CNamedValue)
-            (lvalue as CNamedValue).modifiedSinceLastHome = true;
-          else if (lvalue is CGlobalValueReference)
+          if (left is CNamedValue)
+            (left as CNamedValue).modifiedSinceLastHome = true;
+          else if (left is CGlobalValueReference)
             throw new NotImplementedException();
         }
         else
         {
-          byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+          byteCodeState.registers[leftRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
           resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position.registerIndex = leftRegisterIndex;
         }
       }
     }
@@ -1877,11 +1931,11 @@ namespace llsc
       if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(lvalue, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -1932,11 +1986,11 @@ namespace llsc
       if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(lvalue, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -1989,11 +2043,11 @@ namespace llsc
       if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(lvalue, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -2046,11 +2100,11 @@ namespace llsc
       if (!rvalue.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized rvalue {rvalue}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(lvalue, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(lvalue, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -2066,6 +2120,116 @@ namespace llsc
         rvalue.remainingReferences--;
 
         byteCodeState.instructions.Add(new LLI_NotRegister(lvalueRegisterIndex));
+
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Less : CInstruction
+  {
+    CValue left, right;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_Less(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) || (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+
+      this.left = lvalue;
+      this.right = rvalue;
+      this.stackSize = stackSize;
+
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} < {rvalue})" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!left.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {left}.", file, line);
+
+      if (!right.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized rvalue {right}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(left, stackSize);
+
+      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      {
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+
+        if (left is CNamedValue || left is CGlobalValueReference)
+        {
+          if (left is CNamedValue)
+            byteCodeState.MoveValueToHome(left as CNamedValue, stackSize);
+          else if (left is CGlobalValueReference)
+            throw new NotImplementedException();
+        }
+
+        byteCodeState.instructions.Add(new LLI_LessThanRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+
+        left.remainingReferences--;
+        right.remainingReferences--;
+
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Greater : CInstruction
+  {
+    CValue left, right;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_Greater(CValue lvalue, CValue rvalue, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if ((lvalue.type is BuiltInCType && (lvalue.type as BuiltInCType).IsFloat()) || (rvalue.type is BuiltInCType && (rvalue.type as BuiltInCType).IsFloat()))
+        Compiler.Error($"Both values of the operator have to be non-floating point. Given: '{lvalue}' and '{rvalue}'.", file, line);
+
+      this.left = lvalue;
+      this.right = rvalue;
+      this.stackSize = stackSize;
+
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} > {rvalue})" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!left.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {left}.", file, line);
+
+      if (!right.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized rvalue {right}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(left, stackSize);
+
+      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      {
+        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+
+        if (left is CNamedValue || left is CGlobalValueReference)
+        {
+          if (left is CNamedValue)
+            byteCodeState.MoveValueToHome(left as CNamedValue, stackSize);
+          else if (left is CGlobalValueReference)
+            throw new NotImplementedException();
+        }
+
+        byteCodeState.instructions.Add(new LLI_GreaterThanRegister(lvalueRegisterIndex, rvalueRegisterIndex));
+
+        left.remainingReferences--;
+        right.remainingReferences--;
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
@@ -2099,7 +2263,7 @@ namespace llsc
       if (!value.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {value}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(value, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
@@ -2147,7 +2311,7 @@ namespace llsc
       if (!value.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized lvalue {value}.", file, line);
 
-      int lvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(value, stackSize);
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {

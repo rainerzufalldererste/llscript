@@ -305,6 +305,7 @@ namespace llsc
                     nodes.Add(new NStringValue(lineString.Substring(start, i - start), file.filename, line));
                     start = i + 1;
                     endFound = true;
+                    break;
                   }
                 }
 
@@ -1687,7 +1688,18 @@ namespace llsc
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "*", "/", "%", "&", "^" }.Contains((n as NOperator).operatorType));
 
       if (nextOperator == -1)
-        nextOperator = nodes.FindNextSameScope(n => n is NOperator && !new string[] { "<", ">" }.Contains((n as NOperator).operatorType));
+      {
+        bool lastWasCastOrType = false;
+
+        nextOperator = nodes.FindNextSameScope(n => 
+          {
+            bool ret = !lastWasCastOrType && n is NOperator && new string[] { "<", ">" }.Contains((n as NOperator).operatorType);
+
+            lastWasCastOrType = !lastWasCastOrType && (n is NCastKeyword || n is NType);
+
+            return ret;
+          });
+      }
 
       if (nextOperator != -1)
       {
@@ -1739,13 +1751,40 @@ namespace llsc
           if (!(left is CNamedValue))
             left.description += " (left rvalue)";
 
-          if (left.type is VoidCType || left.type is ArrayCType)
-            Error($"Type '{left.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
+          if (left.type is VoidCType)
+            Error($"Type '{left.type}' is illegal for an rvalue.", operatorNode.file, operatorNode.line);
+
+          if (left.type is ArrayCType)
+          {
+            if (!(left is CNamedValue))
+              Error($"Type '{left.type}' cannot be used to perform operations on, since it's not named.", operatorNode.file, operatorNode.line);
+
+            CGlobalValueReference tmp;
+
+            scope.instructions.Add(new CInstruction_ArrayVariableToPtr(left as CNamedValue, out tmp, scope.maxRequiredStackSpace, operatorNode.file, operatorNode.line));
+
+            left = tmp;
+          }
 
           var right = GetRValue(scope, rnodes, ref byteCodeState);
 
           if (!(right is CNamedValue))
             right.description += " (right rvalue)";
+
+          if (right.type is VoidCType)
+            Error($"Type '{left.type}' is illegal for an rvalue.", operatorNode.file, operatorNode.line);
+
+          if (right.type is ArrayCType)
+          {
+            if (!(right is CNamedValue))
+              Error($"Type '{right.type}' cannot be used to perform operations on, since it's not named.", operatorNode.file, operatorNode.line);
+
+            CGlobalValueReference tmp;
+
+            scope.instructions.Add(new CInstruction_ArrayVariableToPtr(right as CNamedValue, out tmp, scope.maxRequiredStackSpace, operatorNode.file, operatorNode.line));
+
+            right = tmp;
+          }
 
           left.remainingReferences++;
           right.remainingReferences++;
@@ -1914,6 +1953,24 @@ namespace llsc
                 CValue resultingValue;
 
                 scope.instructions.Add(new CInstruction_GreaterOrEqual(left, right, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            case "<":
+              {
+                CValue resultingValue;
+
+                scope.instructions.Add(new CInstruction_Less(left, right, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                return resultingValue;
+              }
+
+            case ">":
+              {
+                CValue resultingValue;
+
+                scope.instructions.Add(new CInstruction_Greater(left, right, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
 
                 return resultingValue;
               }

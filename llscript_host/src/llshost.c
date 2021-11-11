@@ -156,6 +156,7 @@ typedef struct
 {
   uint8_t type;
   bool inRegister;
+  bool isVariable;
   uint64_t position;
   char name[];
 } DebugDatabaseVariableLocation;
@@ -318,7 +319,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
     {
       DebugDatabaseHeader *pHeader = pDebugDatabase;
 
-      if (pHeader->debugDatabaseVersion <= 0)
+      if (pHeader->debugDatabaseVersion == 1)
       {
         int64_t l = 0;
         int64_t r = pHeader->entryCount - 1;
@@ -340,6 +341,23 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             pEntry = (uint8_t *)pHeader + sizeof(DebugDatabaseHeader) + pHeader->entryCount * sizeof(DebugDatabaseEntryHeader) + pHeader->entries[i].startOffset;
             break;
           }
+        }
+      }
+      else
+      {
+        static bool complained = false;
+
+        if (!complained)
+        {
+          complained = true;
+
+          fflush(stdout);
+          SetConsoleColour(CC_BrightRed, CC_Black);
+
+          puts("<DEBUG INFORMATION INCOMPATIBLE!>");
+
+          fflush(stdout);
+          ResetConsoleColour();
         }
       }
 
@@ -380,7 +398,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               fflush(stdout);
               SetConsoleColour(CC_DarkGreen, CC_Black);
 
-              printf("% 16" PRIX64 ": %s", address, comment);
+              printf("% 16" PRIX64 ": // %s", address, comment);
               
               fflush(stdout);
               SetConsoleColour(CC_DarkGray, CC_Black);
@@ -2104,45 +2122,48 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (!stepByLine)
             PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister);
 
-          size_t replaceByMatch = (size_t)-1;
-          size_t replaceByAge = (size_t)-1;
-          size_t oldestAge = 0;
-
-          for (size_t j = 0; j < ARRAYSIZE(recentValues); j++)
+          if (pVariableInfo->isVariable)
           {
-            if (recentValues[j].pLocation == NULL)
+            size_t replaceByMatch = (size_t)-1;
+            size_t replaceByAge = (size_t)-1;
+            size_t oldestAge = 0;
+
+            for (size_t j = 0; j < ARRAYSIZE(recentValues); j++)
             {
-              replaceByAge = j;
-              oldestAge = (size_t)-1;
-            }
-            else
-            {
-              if (recentValues[j].pLocation->inRegister && pVariableInfo->inRegister && recentValues[j].pLocation->position == pVariableInfo->position)
+              if (recentValues[j].pLocation == NULL)
               {
-                recentValues[j].pLocation = NULL;
                 replaceByAge = j;
                 oldestAge = (size_t)-1;
               }
               else
               {
-                if (strcmp(recentValues[j].pLocation->name, pVariableInfo->name) == 0)
+                if (recentValues[j].pLocation->inRegister && pVariableInfo->inRegister && recentValues[j].pLocation->position == pVariableInfo->position)
                 {
-                  replaceByMatch = j;
-                }
-                else if (recentValues[j].age > oldestAge)
-                {
+                  recentValues[j].pLocation = NULL;
                   replaceByAge = j;
-                  oldestAge = recentValues[j].age;
+                  oldestAge = (size_t)-1;
+                }
+                else
+                {
+                  if (strcmp(recentValues[j].pLocation->name, pVariableInfo->name) == 0)
+                  {
+                    replaceByMatch = j;
+                  }
+                  else if (recentValues[j].age > oldestAge)
+                  {
+                    replaceByAge = j;
+                    oldestAge = recentValues[j].age;
+                  }
                 }
               }
             }
-          }
 
-          const size_t replaceIndex = replaceByMatch != (size_t)-1 ? replaceByMatch : replaceByAge;
-          
-          recentValues[replaceIndex].pLocation = pVariableInfo;
-          recentValues[replaceIndex].age = 0;
-          recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+            const size_t replaceIndex = replaceByMatch != (size_t)-1 ? replaceByMatch : replaceByAge;
+
+            recentValues[replaceIndex].pLocation = pVariableInfo;
+            recentValues[replaceIndex].age = 0;
+            recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+          }
         }
 
         ResetConsoleColour();

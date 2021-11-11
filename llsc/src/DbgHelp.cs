@@ -97,6 +97,7 @@ namespace llsc
 
       bytes.Add((byte)type);
       bytes.Add(position.inRegister ? (byte)1 : (byte)0);
+      bytes.Add(isVariable ? (byte)1 : (byte)0) ;
 
       if (position.inRegister)
         bytes.AddRange(BitConverter.GetBytes((ulong)position.registerIndex));
@@ -296,7 +297,7 @@ namespace llsc
         List<byte> header = new List<byte>();
         List<byte> body = new List<byte>();
 
-        header.AddRange(BitConverter.GetBytes((ulong)0));
+        header.AddRange(BitConverter.GetBytes((ulong)1)); // Debug Info Version.
 
         ulong count = 0;
 
