@@ -17,8 +17,7 @@ namespace llsc
     public readonly long callStackSize;
     public List<Node> nodes;
     public Scope scope;
-    public LLI_Label_PseudoInstruction functionStartLabel = new LLI_Label_PseudoInstruction(),
-      functionEndLabel = new LLI_Label_PseudoInstruction();
+    public LLI_Label_PseudoInstruction functionStartLabel, functionEndLabel;
 
     public CFunction(string name, CType returnType, IEnumerable<FunctionParameter> parameters, string file, int line)
     {
@@ -27,6 +26,9 @@ namespace llsc
       this.parameters = parameters.ToArray();
       this.file = file;
       this.line = line;
+
+      functionStartLabel = new LLI_Label_PseudoInstruction($"Function Start Label for '{this}' ({file}:{line})");
+      functionEndLabel = new LLI_Label_PseudoInstruction($"Function End Label for '{this}' ({file}:{line})");
 
       minStackSize.Value = 8; // Return Address.
       

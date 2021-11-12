@@ -553,6 +553,12 @@ namespace llsc
             case "voidptr":
               file.nodes[i] = new NType(new PtrCType(VoidCType.Instance), node.file, node.line);
               break;
+
+            case "nullptr":
+            case "null":
+            case "NULL":
+              file.nodes[i] = new NNull(node.file, node.line);
+              break;
           }
         }
       }
@@ -1065,11 +1071,11 @@ namespace llsc
           var value = GetRValue(scope, condition.ToList(), ref byteCodeState);
           nodes.RemoveRange(0, endIndex + 1);
 
-          var afterIfElseLabel = new LLI_Label_PseudoInstruction();
+          var afterIfElseLabel = new LLI_Label_PseudoInstruction($"After if-else '{ifNode}' in {ifNode.file}:{ifNode.line}");
 
           // Handle Conditional Block.
           {
-            var nextElseLabel = new LLI_Label_PseudoInstruction();
+            var nextElseLabel = new LLI_Label_PseudoInstruction($"First next else label for '{ifNode}' in {ifNode.file}:{ifNode.line}");
             scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, nextElseLabel, scope.maxRequiredStackSpace, true, ifNode.file, ifNode.line));
 
             // Inside If Block.
@@ -1097,6 +1103,8 @@ namespace llsc
             scope.instructions.Add(new CInstruction_Label(nextElseLabel, ifNode.file, ifNode.line));
           }
 
+          int elseCount = 1;
+
           // Handle Else and Else-If blocks.
           while (true)
           {
@@ -1108,7 +1116,7 @@ namespace llsc
             var elseNode = nodes[0];
             nodes.RemoveAt(0);
 
-            LLI_Label_PseudoInstruction nextElseLabel = new LLI_Label_PseudoInstruction();
+            LLI_Label_PseudoInstruction nextElseLabel = new LLI_Label_PseudoInstruction($"Next else label #{elseCount++} for '{ifNode}' in {ifNode.file}:{ifNode.line}");
 
             if (!isLastElse)
             {
@@ -1167,18 +1175,19 @@ namespace llsc
           if (nodes.Count < 4 || !(nodes[0] is NOpenParanthesis))
             Error($"Unexpected {(nodes.Count == 0 ? "end" : nodes[0].ToString())} in loop condition.", whileNode.file, whileNode.line);
 
-          int endIndex = nodes.FindNextSameScope(n => n is NCloseParanthesis);
+          var conditionRange = nodes.GetRange(1, nodes.Count - 1);
+          int endIndex = conditionRange.FindNextSameScope(n => n is NCloseParanthesis);
 
           if (endIndex == 1)
             Error($"Missing condition in loop condition.", nodes[1].file, nodes[1].line);
 
-          var condition = nodes.GetRange(1, endIndex - 1);
+          var condition = conditionRange.GetRange(0, endIndex);
           var value = GetRValue(scope, condition.ToList(), ref byteCodeState);
-          nodes.RemoveRange(0, endIndex + 1);
+          nodes.RemoveRange(0, endIndex + 2);
           
-          LLI_Label_PseudoInstruction afterWhileLabel = new LLI_Label_PseudoInstruction();
-          LLI_Label_PseudoInstruction beforeWhileLabel = new LLI_Label_PseudoInstruction();
-          LLI_Label_PseudoInstruction beforeWhileConsecutiveLabel = new LLI_Label_PseudoInstruction();
+          LLI_Label_PseudoInstruction afterWhileLabel = new LLI_Label_PseudoInstruction($"After {whileNode} in {whileNode.file}:{whileNode.line}");
+          LLI_Label_PseudoInstruction beforeWhileLabel = new LLI_Label_PseudoInstruction($"Before {whileNode} in {whileNode.file}:{whileNode.line}");
+          LLI_Label_PseudoInstruction beforeWhileConsecutiveLabel = new LLI_Label_PseudoInstruction($"Before consecutive executions of {whileNode} in {whileNode.file}:{whileNode.line}");
 
           scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(beforeWhileLabel, whileNode.file, whileNode.line));
@@ -1189,8 +1198,10 @@ namespace llsc
 
             if (nodes[0] is NOpenScope)
             {
-              int scopeEndIndex = nodes.FindNextSameScope(n => n is NCloseScope);
-              scopeNodes = nodes.GetRange(1, scopeEndIndex - 1);
+              var scopeRange = nodes.GetRange(1, nodes.Count - 1);
+              int scopeEndIndex = scopeRange.FindNextSameScope(n => n is NCloseScope);
+              scopeNodes = scopeRange.GetRange(0, scopeEndIndex);
+              nodes = scopeRange;
               nodes.RemoveRange(0, scopeEndIndex + 1);
             }
             else
@@ -1707,9 +1718,6 @@ namespace llsc
 
         if (nextOperator == 0)
         {
-          if (!new string[] { "~", "!" }.Contains(operatorNode.operatorType)) // TODO: How will we implement 'negate'?
-            Error($"Unexpected {operatorNode} in rvalue.", operatorNode.file, operatorNode.line);
-
           var value = GetRValue(scope, nodes.GetRange(1, nodes.Count - 1), ref byteCodeState);
 
           value.remainingReferences++;
@@ -1732,6 +1740,53 @@ namespace llsc
                 scope.instructions.Add(new CInstruction_LogicalNot(value, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
 
                 return resultingValue;
+              }
+
+            case "-":
+              {
+                if (value is CConstIntValue)
+                {
+                  var _value = (value as CConstIntValue);
+
+                  if ((_value.type as BuiltInCType).IsUnsigned())
+                  {
+                    if (_value.smallestPossibleSignedType == null)
+                      Error($"Attempting to negate value '{value}' that cannot be represented by a signed value.", operatorNode.file, operatorNode.line);
+
+                    CValue resultingValue = _value.MakeCastableClone(_value.smallestPossibleSignedType, scope, ref byteCodeState);
+                    resultingValue.description += $" (negated '{value}')";
+
+                    (resultingValue as CConstIntValue).ivalue = -(resultingValue as CConstIntValue).ivalue;
+                    unchecked { (resultingValue as CConstIntValue).uvalue = (ulong)(resultingValue as CConstIntValue).ivalue; }
+
+                    return resultingValue;
+                  }
+                  else
+                  {
+                    _value.description += " (negated)";
+                    _value.ivalue = -_value.ivalue;
+                    unchecked { _value.uvalue = (ulong)_value.ivalue; }
+
+                    return _value;
+                  }
+                }
+                else if (value is CConstFloatValue)
+                {
+                  var _value = (value as CConstFloatValue);
+
+                  _value.description += " (negated)";
+                  _value.value = -_value.value;
+
+                  return _value;
+                }
+                else
+                {
+                  CValue resultingValue;
+
+                  scope.instructions.Add(new CInstruction_Negate(value, scope.maxRequiredStackSpace, out resultingValue, operatorNode.file, operatorNode.line));
+
+                  return resultingValue;
+                }
               }
 
             default:
@@ -2189,7 +2244,7 @@ namespace llsc
             {
               if (nodes.Count == 3 && nodes[1] is NType)
               {
-                return new CConstIntValue((ulong)(nodes[1] as NType).type.GetSize(), BuiltInCType.Types["u64"], pseudoFunction.file, pseudoFunction.line);
+                return new CConstIntValue(new NIntegerValue(false, (ulong)(nodes[1] as NType).type.GetSize(), (long)(nodes[1] as NType).type.GetSize(), pseudoFunction.file, pseudoFunction.line)) { description = $"'{pseudoFunction}'('{nodes[1]}')" };
               }
               else
               {
@@ -2199,7 +2254,7 @@ namespace llsc
                 if (!(rvalue is CNamedValue))
                   rvalue.description += " (rvalue)";
 
-                return new CConstIntValue((ulong)rvalue.type.GetSize(), BuiltInCType.Types["u64"], pseudoFunction.file, pseudoFunction.line);
+                return new CConstIntValue(new NIntegerValue(false, (ulong)rvalue.type.GetSize(), (long)rvalue.type.GetSize(), pseudoFunction.file, pseudoFunction.line)) { description = $"'{pseudoFunction}'('{rvalue}')" };
               }
             }
 
@@ -2210,7 +2265,7 @@ namespace llsc
                 if (!((nodes[1] as NType).type is ArrayCType))
                   Error($"Invalid use of {nodes[1]} with {pseudoFunction}. Expected array or array type.", nodes[1].file, nodes[1].line);
 
-                return new CConstIntValue((ulong)((nodes[1] as NType).type as ArrayCType).count, BuiltInCType.Types["u64"], pseudoFunction.file, pseudoFunction.line);
+                return new CConstIntValue(new NIntegerValue(false, (ulong)((nodes[1] as NType).type as ArrayCType).count, (long)((nodes[1] as NType).type as ArrayCType).count, pseudoFunction.file, pseudoFunction.line)) { description = $"'{pseudoFunction}'('{nodes[1]}')" };
               }
               else
               {
@@ -2223,7 +2278,7 @@ namespace llsc
                 if (!(rvalue.type is ArrayCType))
                   Error($"Invalid use of rvalue of type '{rvalue.type}' with {pseudoFunction}. Expected array or array type.", nodes[1].file, nodes[1].line);
 
-                return new CConstIntValue((ulong)(rvalue.type as ArrayCType).count, BuiltInCType.Types["u64"], pseudoFunction.file, pseudoFunction.line);
+                return new CConstIntValue(new NIntegerValue(false, (ulong)(rvalue.type as ArrayCType).count, (long)(rvalue.type as ArrayCType).count, pseudoFunction.file, pseudoFunction.line)) { description = $"'{pseudoFunction}'('{rvalue}')" };
               }
             }
 
@@ -2239,7 +2294,7 @@ namespace llsc
                 foreach (var attribute in structType.attributes)
                 {
                   if (attribute.name == (nodes[1] as NName).name)
-                    return new CConstIntValue((ulong)attribute.offset, BuiltInCType.Types["u64"], pseudoFunction.file, pseudoFunction.line);
+                    return new CConstIntValue(new NIntegerValue(false, (ulong)attribute.offset, (long)attribute.offset, pseudoFunction.file, pseudoFunction.line)) { description = $"'{pseudoFunction}'('{attribute} of {structType}')" };
                 }
 
                 Error($"Invalid attribute name ({nodes[1]}) for {structType} with {pseudoFunction}.", nodes[1].file, nodes[1].line);
@@ -2334,9 +2389,13 @@ namespace llsc
         scope.instructions.Add(new CInstruction_SetArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
         return inlineString;
       }
+      else if (nodes[0] is NNull && nodes.Count == 1)
+      {
+        return new CNullValue(nodes[0].file, nodes[0].line);
+      }
       else
       {
-        Error($"Unexpected {nodes[0]}.", nodes[0].file, nodes[0].line);
+        Error($"Unexpected {nodes[0]}. Expected lvalue.", nodes[0].file, nodes[0].line);
         return null; // Unreachable.
       }
     }

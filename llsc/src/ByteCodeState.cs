@@ -787,6 +787,22 @@ namespace llsc
             instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, position.stackOffsetForward, (int)size));
         }
       }
+      else if (sourceValue is CNullValue)
+      {
+        var bytes = BitConverter.GetBytes((ulong)0);
+
+        if (position.inRegister)
+        {
+          instructions.Add(new LLI_MovImmToRegister(position.registerIndex, bytes));
+        }
+        else
+        {
+          var register = GetFreeIntegerRegister(stackSize);
+
+          instructions.Add(new LLI_MovImmToRegister(register, bytes));
+          instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, position.stackOffsetForward));
+        }
+      }
       else
       {
         if (!sourceValue.hasPosition)

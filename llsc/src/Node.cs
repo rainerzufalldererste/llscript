@@ -479,4 +479,11 @@ namespace llsc
 
     public override string ToString() => $"floating point value '{value}'";
   }
+
+  public class NNull : Node
+  {
+    public NNull(string file, int line) : base(file, line) { }
+
+    public override string ToString() => $"null pointer";
+  }
 }

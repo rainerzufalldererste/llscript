@@ -1403,9 +1403,6 @@ namespace llsc
         }
 
         byteCodeState.instructions.Add(new LLI_NegateRegister(rightRegisterIndex));
-
-        if (right.type is PtrCType)
-
         byteCodeState.instructions.Add(new LLI_AddRegister(leftRegisterIndex, rightRegisterIndex));
 
         left.remainingReferences--;
@@ -1935,7 +1932,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -1990,7 +1987,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -2047,7 +2044,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -2104,7 +2101,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(rvalue, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(rvalue, stackSize);
 
         if (lvalue is CNamedValue || lvalue is CGlobalValueReference)
         {
@@ -2161,7 +2158,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(right, stackSize);
 
         if (left is CNamedValue || left is CGlobalValueReference)
         {
@@ -2216,7 +2213,7 @@ namespace llsc
 
       using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
       {
-        int rvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+        int rvalueRegisterIndex = byteCodeState.MoveValueToAnyRegister(right, stackSize);
 
         if (left is CNamedValue || left is CGlobalValueReference)
         {
@@ -2324,6 +2321,54 @@ namespace llsc
         }
 
         byteCodeState.instructions.Add(new LLI_NotRegister(lvalueRegisterIndex));
+
+        value.remainingReferences--;
+
+        byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
+        resultingValue.hasPosition = true;
+        resultingValue.position.inRegister = true;
+        resultingValue.position.registerIndex = lvalueRegisterIndex;
+      }
+    }
+  }
+
+  public class CInstruction_Negate : CInstruction
+  {
+    CValue value;
+    SharedValue<long> stackSize;
+    CValue resultingValue;
+
+    public CInstruction_Negate(CValue value, SharedValue<long> stackSize, out CValue resultingValue, string file, int line) : base(file, line)
+    {
+      if (value.type is BuiltInCType && (value.type as BuiltInCType).IsUnsigned())
+        Compiler.Error($"Attempting to negate unsigned value '{value}'. This requires a cast.", file, line);
+
+      this.value = value;
+      this.stackSize = stackSize;
+
+      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"-({value})" };
+
+      resultingValue = this.resultingValue;
+    }
+
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
+      if (!value.isInitialized)
+        Compiler.Error($"Cannot perform operator on uninitialized lvalue {value}.", file, line);
+
+      int lvalueRegisterIndex = byteCodeState.CopyValueToAnyRegister(value, stackSize);
+
+      using (var registerLock = byteCodeState.LockRegister(lvalueRegisterIndex))
+      {
+        if (value is CNamedValue || value is CGlobalValueReference)
+        {
+          if (value is CNamedValue)
+            byteCodeState.MoveValueToHome(value as CNamedValue, stackSize);
+          else if (value is CGlobalValueReference)
+            throw new NotImplementedException();
+        }
+
+        byteCodeState.instructions.Add(new LLI_NegateRegister(lvalueRegisterIndex));
 
         value.remainingReferences--;
 

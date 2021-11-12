@@ -73,9 +73,9 @@ namespace llsc
 
   public class CConstIntValue : CValue
   {
-    public ulong uvalue { get; protected set; }
+    public ulong uvalue { get; set; }
 
-    public long ivalue { get; protected set; }
+    public long ivalue { get; set; }
 
     public CType smallestPossibleSignedType { get; protected set; } = null;
 
@@ -213,7 +213,7 @@ namespace llsc
 
   public class CConstFloatValue : CValue
   {
-    public double value { get; protected set; }
+    public double value { get; set; }
 
     protected CConstFloatValue() : base() { }
 
@@ -310,5 +310,13 @@ namespace llsc
     }
 
     public override string ToString() => "unnamed global (?) value [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+  }
+
+  public class CNullValue : CValue
+  {
+    public CNullValue(string file, int line) : base(file, line, new PtrCType(VoidCType.Instance), true, true)
+    {
+
+    }
   }
 }

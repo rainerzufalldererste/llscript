@@ -55,6 +55,7 @@ push rbx
 push rdi
 push rsi
 sub rsp, 120 ; this needs to be 16 bit aligned minus 8 (because `call` will push 8 bytes to the stack)
+mov rsi, rsp
 
 
 ; Move script stack ptr to rax.
@@ -136,8 +137,6 @@ movsd xmm3, qword ptr [r9]
 after_param4:
 ; move to next param.
 sub rax, 8
-
-mov rsi, rsp
 
 ; Remaining Params
 remaining_params:

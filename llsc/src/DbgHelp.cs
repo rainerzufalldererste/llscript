@@ -82,6 +82,10 @@ namespace llsc
         else
           type = DbgType.DT_OtherArray;
       }
+      else if (value.type is ExternFuncCType)
+      {
+        type = DbgType.DT_OtherPtr;
+      }
       else
       {
         type = DbgTypeHelper(value.type);
@@ -262,10 +266,14 @@ namespace llsc
         if (lastFile != instruction.file)
         {
           printLine = true;
-          printedFile = true;
           lastFile = instruction.file;
           lastLine = -1;
-          current.line += "File: " + (lastFile == null ? "<compiler internal>" : lastFile);
+
+          if (lastFile != null)
+          {
+            printedFile = true;
+            current.line += "File: " + (lastFile == null ? "<compiler internal>" : lastFile);
+          }
         }
 
         if (lastLine != instruction.line)

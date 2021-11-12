@@ -42,6 +42,7 @@
 #define LOG_DELIMITER() do { if (!silent) fputs(", ", stdout); } while (0)
 #define LOG_DETAILS() do { if (!silent) fputs("\n\t\t// ", stdout); } while (0)
 #define LOG_STRING(x) do { if (!silent) fputs((x), stdout); } while (0)
+#define LOG_ERROR(x) do { if (!silent) { fflush(stdout); SetConsoleColour(CC_BrightRed, CC_Black); fputs((x), stdout); fflush(stdout); ResetConsoleColour(); } } while (0)
 #define LOG_INFO_START() do { if (!silent) fputs(" -> (", stdout); } while (0)
 #define LOG_INFO_END() do { if (!silent) fputs(")", stdout); } while (0)
 #define LOG_END() do { if (!silent) puts(""); } while (0)
@@ -250,6 +251,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 #define LOG_DELIMITER()
 #define LOG_DETAILS()
 #define LOG_STRING(x)
+#define LOG_ERROR(x)
 #define LOG_INFO_START()
 #define LOG_INFO_END()
 #define LOG_END()
@@ -1956,7 +1958,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (iregister[target_register] == 0)
             {
               LOG_DETAILS();
-              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_ERROR("Failed! (Return Value was 0)");
               LOG_END();
             }
           }
@@ -1997,7 +1999,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (iregister[target_register] == 0)
             {
               LOG_DETAILS();
-              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_ERROR("Failed! (Return Value was 0)");
               LOG_END();
             }
           }
@@ -2021,7 +2023,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (iregister[target_register] == 0)
             {
               LOG_DETAILS();
-              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_ERROR("Failed! (Return Value was 0)");
               LOG_END();
             }
           }
@@ -2047,7 +2049,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (iregister[target_register] == 0)
             {
               LOG_DETAILS();
-              LOG_STRING("Failed! (Return Value was 0)");
+              LOG_ERROR("Failed! (Return Value was 0)");
               LOG_END();
             }
           }

@@ -1,0 +1,92 @@
+#r "System"
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+
+void Fail(string error)
+{
+  Console.WriteLine(error);
+  Environment.Exit(-1);
+}
+
+string CallProcess(string processName, string args, out int exitCode)
+{
+  StringBuilder outputBuilder;
+  System.Diagnostics.ProcessStartInfo processStartInfo;
+  System.Diagnostics.Process process;
+
+  outputBuilder = new StringBuilder();
+
+  processStartInfo = new System.Diagnostics.ProcessStartInfo();
+  processStartInfo.CreateNoWindow = true;
+  processStartInfo.RedirectStandardOutput = true;
+  processStartInfo.RedirectStandardInput = true;
+  processStartInfo.UseShellExecute = false;
+  processStartInfo.Arguments = args;
+  processStartInfo.FileName = processName;
+
+  process = new System.Diagnostics.Process();
+  process.StartInfo = processStartInfo;
+  process.EnableRaisingEvents = true;
+
+  process.OutputDataReceived += new System.Diagnostics.DataReceivedEventHandler
+  (
+    delegate(object sender, System.Diagnostics.DataReceivedEventArgs e)
+    {
+      outputBuilder.Append(e.Data);
+    }
+  );
+  
+  process.Start();
+  process.BeginOutputReadLine();
+  process.WaitForExit();
+  process.CancelOutputRead();
+
+  exitCode = process.ExitCode;
+
+  return outputBuilder.ToString();
+}
+
+try
+{
+  Directory.CreateDirectory("tmp");
+
+  string scriptFile = "tmp/code.lls";
+  string byteCodeFile = "tmp/bytecode.lls";
+
+  var tests = Directory.GetFiles("tests/", "*.lls");
+
+  Console.WriteLine($"\nRunning {tests.Count()} UnitTest(s)...\n");
+
+  foreach (var test in tests)
+  {
+    Console.WriteLine($"Testing {test} ...");
+
+    File.Copy(test, scriptFile, true);
+
+    string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile} -S+ -dbgdb -o=\"{byteCodeFile}\"", out int exitCode);
+
+    if (exitCode != 0)
+      Fail($"Failed to compile test {test}\n\n{output}");
+    
+    output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
+
+    if (exitCode != 0)
+      Fail($"Failed to execute test {test}\n\n{output}");
+
+    var expected = File.ReadAllText(test.Replace("lls", "txt"));
+    
+    if (expected != output)
+      Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
+  }
+
+  Console.WriteLine("\nAll UnitTests succeeded!");
+}
+catch (Exception e)
+{
+  Console.WriteLine($"Failed with error: {e.Message}\n{e}");
+}
+
+Directory.Delete("tmp", true);

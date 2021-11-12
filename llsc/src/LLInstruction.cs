@@ -127,11 +127,16 @@ namespace llsc
 
   public class LLI_Label_PseudoInstruction : LLI_PseudoInstruction
   {
-    public LLI_Label_PseudoInstruction() : base(0) { }
+    public string description;
+
+    public LLI_Label_PseudoInstruction(string description) : base(0)
+    {
+      this.description = description;
+    }
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
 
-    public override string ToString() => $"label_0x{GetHashCode():X}_at_0x{position:X}:";
+    public override string ToString() => $"label_0x{GetHashCode():X}_at_0x{position:X}: ('{description}')";
   }
 
   public class LLI_Comment_PseudoInstruction : LLI_PseudoInstruction

@@ -112,22 +112,68 @@ namespace llsc
       int parantesisLevel = 0;
       int braceLevel = 0;
 
+      bool end = false;
+
       for (int i = start; i < nodes.Count; i++)
       {
-        if (nodes[i] is NOpenParanthesis)
-          ++parantesisLevel;
-        else if (nodes[i] is NCloseParanthesis)
-          --parantesisLevel;
-        else if (nodes[i] is NOpenBracket)
-          ++bracketLevel;
-        else if (nodes[i] is NCloseBracket)
-          --bracketLevel;
-        else if (nodes[i] is NOpenScope)
-          ++braceLevel;
-        else if (nodes[i] is NCloseScope)
-          --braceLevel;
+        if (end)
+          return -1;
 
-        if (bracketLevel <= 0 && parantesisLevel <= 0 && braceLevel <= 0 && check(nodes[i]))
+        bool found = false;
+
+        if (nodes[i] is NOpenParanthesis)
+        {
+          ++parantesisLevel;
+          found = true;
+        }
+        else if (nodes[i] is NCloseParanthesis)
+        {
+          if (parantesisLevel > 0)
+          {
+            --parantesisLevel;
+            found = true;
+          }
+          else
+          {
+            end = true;
+          }
+        }
+        else if (nodes[i] is NOpenBracket)
+        {
+          ++bracketLevel;
+          found = true;
+        }
+        else if (nodes[i] is NCloseBracket)
+        {
+          if (bracketLevel > 0)
+          {
+            --bracketLevel;
+            found = true;
+          }
+          else
+          {
+            end = true;
+          }
+        }
+        else if (nodes[i] is NOpenScope)
+        {
+          ++braceLevel;
+          found = true;
+        }
+        else if (nodes[i] is NCloseScope)
+        {
+          if (bracketLevel > 0)
+          {
+            --braceLevel;
+            found = true;
+          }
+          else
+          {
+            end = true;
+          }
+        }
+
+        if (!found && bracketLevel == 0 && parantesisLevel == 0 && braceLevel == 0 && check(nodes[i]))
           return i;
       }
 
