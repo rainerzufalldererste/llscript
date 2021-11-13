@@ -162,7 +162,7 @@ namespace llsc
         }
         else if (nodes[i] is NCloseScope)
         {
-          if (bracketLevel > 0)
+          if (braceLevel > 0)
           {
             --braceLevel;
             found = true;

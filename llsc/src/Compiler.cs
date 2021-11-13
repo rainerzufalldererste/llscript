@@ -147,10 +147,29 @@ namespace llsc
         Console.WriteLine($"Successfully wrote byte code to '{outFileName}'.");
 
         if (EmitAsm)
-          WriteDisasm(outFileName, files, byteCodeState);
+        {
+          try
+          {
+            WriteDisasm(outFileName, files, byteCodeState);
+          }
+          catch (Exception e)
+          {
+            Console.WriteLine($"Failed to write disasm with internal compiler error '{e.Message}'.\n{e}");
+          }
+        }
 
         if (EmitDbgDatabse)
-          DbgDatabase.Write(outFileName, files, byteCodeState);
+        {
+          try
+          {
+            DbgDatabase.Write(outFileName, files, byteCodeState);
+          }
+          catch (Exception e)
+          {
+            Console.WriteLine($"Failed to write debug database with internal compiler error '{e.Message}'.\n{e}");
+          }
+        }
+
       }
       catch (CompileFailureException e)
       {
@@ -1062,20 +1081,21 @@ namespace llsc
           if (nodes.Count < 4 || !(nodes[0] is NOpenParanthesis))
             Error($"Unexpected {(nodes.Count == 0 ? "end" : nodes[0].ToString())} in conditional expression.", ifNode.file, ifNode.line);
 
-          int endIndex = nodes.FindNextSameScope(n => n is NCloseParanthesis);
+          var conditionRange = nodes.GetRange(1, nodes.Count - 1);
+          int endIndex = conditionRange.FindNextSameScope(n => n is NCloseParanthesis);
 
-          if (endIndex == 1)
+          if (endIndex == 0)
             Error($"Missing condition in conditional expression.", nodes[1].file, nodes[1].line);
 
-          var condition = nodes.GetRange(1, endIndex - 1);
+          var condition = conditionRange.GetRange(0, endIndex);
           var value = GetRValue(scope, condition.ToList(), ref byteCodeState);
-          nodes.RemoveRange(0, endIndex + 1);
+          nodes.RemoveRange(0, endIndex + 2);
 
-          var afterIfElseLabel = new LLI_Label_PseudoInstruction($"After if-else '{ifNode}' in {ifNode.file}:{ifNode.line}");
+          var afterIfElseLabel = new LLI_Label_PseudoInstruction($"After if-else '{ifNode}' in {ifNode.file}:{ifNode.line + 1}");
 
           // Handle Conditional Block.
           {
-            var nextElseLabel = new LLI_Label_PseudoInstruction($"First next else label for '{ifNode}' in {ifNode.file}:{ifNode.line}");
+            var nextElseLabel = new LLI_Label_PseudoInstruction($"First next else label for '{ifNode}' in {ifNode.file}:{ifNode.line + 1}");
             scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, nextElseLabel, scope.maxRequiredStackSpace, true, ifNode.file, ifNode.line));
 
             // Inside If Block.
@@ -1116,7 +1136,7 @@ namespace llsc
             var elseNode = nodes[0];
             nodes.RemoveAt(0);
 
-            LLI_Label_PseudoInstruction nextElseLabel = new LLI_Label_PseudoInstruction($"Next else label #{elseCount++} for '{ifNode}' in {ifNode.file}:{ifNode.line}");
+            LLI_Label_PseudoInstruction nextElseLabel = new LLI_Label_PseudoInstruction($"Next else label #{elseCount++} for '{ifNode}' in {ifNode.file}:{ifNode.line + 1}");
 
             if (!isLastElse)
             {
@@ -1178,16 +1198,16 @@ namespace llsc
           var conditionRange = nodes.GetRange(1, nodes.Count - 1);
           int endIndex = conditionRange.FindNextSameScope(n => n is NCloseParanthesis);
 
-          if (endIndex == 1)
+          if (endIndex <= 0)
             Error($"Missing condition in loop condition.", nodes[1].file, nodes[1].line);
 
           var condition = conditionRange.GetRange(0, endIndex);
           var value = GetRValue(scope, condition.ToList(), ref byteCodeState);
           nodes.RemoveRange(0, endIndex + 2);
           
-          LLI_Label_PseudoInstruction afterWhileLabel = new LLI_Label_PseudoInstruction($"After {whileNode} in {whileNode.file}:{whileNode.line}");
-          LLI_Label_PseudoInstruction beforeWhileLabel = new LLI_Label_PseudoInstruction($"Before {whileNode} in {whileNode.file}:{whileNode.line}");
-          LLI_Label_PseudoInstruction beforeWhileConsecutiveLabel = new LLI_Label_PseudoInstruction($"Before consecutive executions of {whileNode} in {whileNode.file}:{whileNode.line}");
+          LLI_Label_PseudoInstruction afterWhileLabel = new LLI_Label_PseudoInstruction($"After {whileNode} in {whileNode.file}:{whileNode.line + 1}");
+          LLI_Label_PseudoInstruction beforeWhileLabel = new LLI_Label_PseudoInstruction($"Before {whileNode} in {whileNode.file}:{whileNode.line + 1}");
+          LLI_Label_PseudoInstruction beforeWhileConsecutiveLabel = new LLI_Label_PseudoInstruction($"Before consecutive executions of {whileNode} in {whileNode.file}:{whileNode.line + 1}");
 
           scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(beforeWhileLabel, whileNode.file, whileNode.line));
@@ -1200,6 +1220,10 @@ namespace llsc
             {
               var scopeRange = nodes.GetRange(1, nodes.Count - 1);
               int scopeEndIndex = scopeRange.FindNextSameScope(n => n is NCloseScope);
+
+              if (scopeEndIndex == -1)
+                Error($"Failed to find end of loop statement '{whileNode}'.", whileNode.file, whileNode.line);
+
               scopeNodes = scopeRange.GetRange(0, scopeEndIndex);
               nodes = scopeRange;
               nodes.RemoveRange(0, scopeEndIndex + 1);
@@ -2206,6 +2230,15 @@ namespace llsc
       {
         var targetType = (nodes[2] as NType).type;
         var rValueToCast = GetRValue(scope, nodes.GetRange(5, nodes.Count - 6), ref byteCodeState);
+
+        if (rValueToCast.type is ArrayCType && rValueToCast is CNamedValue)
+        {
+          CGlobalValueReference addressOf;
+
+          scope.instructions.Add(new CInstruction_ArrayVariableToPtr((CNamedValue)rValueToCast, out addressOf, scope.maxRequiredStackSpace, nodes[2].file, nodes[2].line));
+
+          rValueToCast = addressOf;
+        }
 
         if (!(rValueToCast is CNamedValue))
           rValueToCast.description += " (rvalue to cast to '" + targetType + "')";

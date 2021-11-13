@@ -823,7 +823,7 @@ namespace llsc
         Compiler.Error($"Parameter {nameof(value)} ({value}) to {nameof(CInstruction_ArrayVariableToPtr)} is not an array but {value.type}.", file, line);
 
       this.value = value;
-      this.outValue = outValue = new CGlobalValueReference(new PtrCType((value.type as ArrayCType).type), file, line, false) { description = $"ptr to '{value}'" };
+      this.outValue = outValue = new CGlobalValueReference(new PtrCType((value.type as ArrayCType).type) { explicitCast = value.type.explicitCast }, file, line, false) { description = $"ptr to '{value}'" };
       this.stackSize = stackSize;
     }
   }

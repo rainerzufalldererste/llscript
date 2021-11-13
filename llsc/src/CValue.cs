@@ -40,7 +40,7 @@ namespace llsc
       this.isInitialized = isInitialized;
     }
 
-    public override string ToString() => $"unnamed value #{index} [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => $"unnamed value #{index} [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
 
     public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -185,7 +185,7 @@ namespace llsc
       base.isInitialized = true;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -232,7 +232,7 @@ namespace llsc
       this.value = value.value;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -273,7 +273,7 @@ namespace llsc
       this.name = name;
     }
 
-    public override string ToString() => (isConst ? "const " : "") + type + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -309,7 +309,7 @@ namespace llsc
 
     }
 
-    public override string ToString() => "unnamed global (?) value [" + (isConst ? "const " : "") + type + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => "unnamed global (?) value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
   }
 
   public class CNullValue : CValue

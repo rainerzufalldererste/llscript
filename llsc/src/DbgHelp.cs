@@ -150,7 +150,7 @@ namespace llsc
             case 4:
               return DbgType.DT_U32;
 
-            case 5:
+            case 8:
               return DbgType.DT_U64;
 
             default: throw new Exception("Unexpected Type.");
@@ -169,7 +169,7 @@ namespace llsc
             case 4:
               return DbgType.DT_I32;
 
-            case 5:
+            case 8:
               return DbgType.DT_I64;
 
             default: throw new Exception("Unexpected Type.");

@@ -27,8 +27,8 @@ namespace llsc
       this.file = file;
       this.line = line;
 
-      functionStartLabel = new LLI_Label_PseudoInstruction($"Function Start Label for '{this}' ({file}:{line})");
-      functionEndLabel = new LLI_Label_PseudoInstruction($"Function End Label for '{this}' ({file}:{line})");
+      functionStartLabel = new LLI_Label_PseudoInstruction($"Function Start Label for '{this}' ({file}:{line + 1})");
+      functionEndLabel = new LLI_Label_PseudoInstruction($"Function End Label for '{this}' ({file}:{line + 1})");
 
       minStackSize.Value = 8; // Return Address.
       
