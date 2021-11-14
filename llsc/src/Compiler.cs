@@ -25,6 +25,11 @@ namespace llsc
     public static readonly int IntegerRegisters = 8;
     public static readonly int FloatRegisters = 8;
 
+    public static class Assumptions
+    {
+      public static bool ByteCodeMutable = false;
+    }
+
     public static void Error(string error, string file, int line)
     {
       Console.ForegroundColor = ConsoleColor.Red;
@@ -102,9 +107,19 @@ namespace llsc
 
             default:
               if (argument.StartsWith("-o="))
+              {
                 outFileName = argument.Substring(3).Trim('\'', '\"');
+              }
+              else if (argument.StartsWith("-assume="))
+              {
+                var assumption = argument.Substring("-assume=".Length).Trim('\'', '\"');
+
+                typeof(Compiler.Assumptions).GetField(assumption).SetValue(null, true);
+              }
               else
+              {
                 Error($"Invalid Parameter '{argument}'.", null, 0);
+              }
               break;
           }
         }
@@ -916,162 +931,12 @@ namespace llsc
         // Dynamic Array.
         else if (nodes.NextIs(typeof(NArrayKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NName), typeof(NOperator)) && ((nodes[1] as NOperator).operatorType == "<" && (nodes[3] as NOperator).operatorType == ">" && (nodes[5] as NOperator).operatorType == "="))
         {
-          if (!((nodes[2] as NType).type is BuiltInCType))
-            Error($"Invalid Type '{(nodes[2] as NType).type.ToString()}'. Dynamically Sized Arrays can only contain builtin types.", nodes[2].file, nodes[2].line);
-
-          var builtinType = (nodes[2] as NType).type as BuiltInCType;
-
-          if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
-          {
-            var stringValue = nodes[6] as NStringValue;
-            var arrayType = new ArrayCType(builtinType, stringValue.length);
-            var value = new CNamedValue(nodes[4] as NName, arrayType, false, true);
-
-            scope.AddVariable(value);
-            scope.instructions.Add(new CInstruction_SetArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
-            nodes.RemoveRange(0, 8);
-          }
-          else if (nodes.Count > 6 && nodes[6] is NOpenScope)
-          {
-            long valueCount = 0;
-            List<byte> data = new List<byte>();
-
-            var startNode = nodes[0];
-            var nameNode = (nodes[4] as NName);
-
-            nodes.RemoveRange(0, 7);
-
-            while (true)
-            {
-              if (nodes.Count == 0)
-              {
-                Error("Unexpected end of array definition.", startNode.file, startNode.line);
-              }
-              else if (nodes[0] is NIntegerValue)
-              {
-                valueCount++;
-                data.AddRange(builtinType.GetAsBytes(nodes[0] as NIntegerValue));
-                nodes.RemoveAt(0);
-
-                if (nodes.Count == 0)
-                {
-                  Error("Unexpected end of array definition.", startNode.file, startNode.line);
-                }
-                else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
-                {
-                  nodes.RemoveRange(0, 2);
-                  break;
-                }
-                else if (nodes.NextIs(typeof(NComma)))
-                {
-                  nodes.RemoveAt(0);
-                }
-                else
-                {
-                  Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
-                }
-              }
-              else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
-              {
-                nodes.RemoveRange(0, 2);
-                break;
-              }
-              else
-              {
-                Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
-              }
-            }
-
-            var arrayType = new ArrayCType(builtinType, valueCount);
-            var value = new CNamedValue(nameNode, arrayType, false, true);
-            value.homeStackOffset = scope.maxRequiredStackSpace.Value;
-            value.hasStackOffset = true;
-            scope.maxRequiredStackSpace.Value += arrayType.GetSize();
-
-            scope.AddVariable(value);
-            scope.instructions.Add(new CInstruction_SetArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
-
-            value.hasPosition = true;
-            value.position.inRegister = false;
-            value.position.stackOffsetForward = value.homeStackOffset;
-          }
+          ParseDynamicArrayInitialization(scope, ref nodes, false);
         }
         // Fixed size array.
         else if (nodes.NextIs(typeof(NType), typeof(NName), typeof(NOperator), typeof(NOpenScope)) && ((nodes[0] as NType).type is ArrayCType && (nodes[2] as NOperator).operatorType == "="))
         {
-          if (!(((nodes[0] as NType).type as ArrayCType).type is BuiltInCType))
-            Error($"Invalid Type '{((nodes[0] as NType).type as ArrayCType).type.ToString()}'. Fixed Size Array Initializers can only contain builtin types.", nodes[0].file, nodes[0].line);
-
-          var nameNode = nodes[1] as NName;
-          var startNode = nodes[0] as NType;
-          var arrayType = startNode.type as ArrayCType;
-          var builtinType = arrayType.type as BuiltInCType;
-
-          nodes.RemoveRange(0, 4);
-
-          var valueCount = 0;
-
-          List<byte> data = new List<byte>();
-
-          while (true)
-          {
-            if (nodes.Count == 0)
-            {
-              Error("Unexpected end of array definition.", startNode.file, startNode.line);
-            }
-            else if (nodes[0] is NIntegerValue)
-            {
-              valueCount++;
-
-              if (valueCount > arrayType.count)
-                Error($"Number of array values in initializer exceeds specified count ({arrayType.count}) for {nameNode}.", nodes[0].file, nodes[0].line);
-
-              data.AddRange(builtinType.GetAsBytes(nodes[0] as NIntegerValue));
-              nodes.RemoveAt(0);
-
-              if (nodes.Count == 0)
-              {
-                Error("Unexpected end of array definition.", startNode.file, startNode.line);
-              }
-              else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
-              {
-                nodes.RemoveRange(0, 2);
-                break;
-              }
-              else if (nodes.NextIs(typeof(NComma)))
-              {
-                nodes.RemoveAt(0);
-              }
-              else
-              {
-                Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
-              }
-            }
-            else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
-            {
-              nodes.RemoveRange(0, 2);
-              break;
-            }
-            else
-            {
-              Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
-            }
-          }
-
-          if (data.Count < arrayType.GetSize())
-            data.AddRange(new byte[arrayType.GetSize() - data.Count]);
-          
-          var value = new CNamedValue(nameNode, arrayType, false, true);
-          value.homeStackOffset = scope.maxRequiredStackSpace.Value;
-          value.hasStackOffset = true;
-          scope.maxRequiredStackSpace.Value += arrayType.GetSize();
-
-          scope.AddVariable(value);
-          scope.instructions.Add(new CInstruction_SetArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
-
-          value.hasPosition = true;
-          value.position.inRegister = false;
-          value.position.stackOffsetForward = value.homeStackOffset;
+          ParseFixedSizeArrayInitialization(scope, ref nodes, false);
         }
         else if (nodes[0] is NIfKeyword)
         {
@@ -1340,7 +1205,7 @@ namespace llsc
             var value = GetLValue(scope, lnodes, ref byteCodeState);
 
             if (value != null && value.type != null && value.type is ArrayCType)
-              scope.instructions.Add(new CInstruction_SetArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace));
+              scope.instructions.Add(new CInstruction_InitializeArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace));
           }
           // `++`, `--`.
           else if (nextEndLine == firstOperator + 1)
@@ -1450,7 +1315,7 @@ namespace llsc
           }
           else
           {
-            Error($"Unexpected Token at Compiler head: {nodes[firstOperator]}.", nodes[firstOperator].file, nodes[firstOperator].line);
+            Error($"Unexpected Token or no valid operator found at parser head: {nodes[0]}.", nodes[0].file, nodes[0].line);
           }
         }
       }
@@ -1525,6 +1390,166 @@ namespace llsc
       }
     }
 
+    private static void ParseFixedSizeArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
+    {
+      if (!(((nodes[0] as NType).type as ArrayCType).type is BuiltInCType))
+        Error($"Invalid Type '{((nodes[0] as NType).type as ArrayCType).type.ToString()}'. Fixed Size Array Initializers can only contain builtin types.", nodes[0].file, nodes[0].line);
+
+      var nameNode = nodes[1] as NName;
+      var startNode = nodes[0] as NType;
+      var arrayType = startNode.type as ArrayCType;
+      var builtinType = arrayType.type as BuiltInCType;
+
+      nodes.RemoveRange(0, 4);
+
+      var valueCount = 0;
+
+      List<byte> data = new List<byte>();
+
+      while (true)
+      {
+        if (nodes.Count == 0)
+        {
+          Error("Unexpected end of array definition.", startNode.file, startNode.line);
+        }
+        else if (nodes[0] is NIntegerValue)
+        {
+          valueCount++;
+
+          if (valueCount > arrayType.count)
+            Error($"Number of array values in initializer exceeds specified count ({arrayType.count}) for {nameNode}.", nodes[0].file, nodes[0].line);
+
+          data.AddRange(builtinType.GetAsBytes(nodes[0] as NIntegerValue));
+          nodes.RemoveAt(0);
+
+          if (nodes.Count == 0)
+          {
+            Error("Unexpected end of array definition.", startNode.file, startNode.line);
+          }
+          else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+          {
+            nodes.RemoveRange(0, 2);
+            break;
+          }
+          else if (nodes.NextIs(typeof(NComma)))
+          {
+            nodes.RemoveAt(0);
+          }
+          else
+          {
+            Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+          }
+        }
+        else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+        {
+          nodes.RemoveRange(0, 2);
+          break;
+        }
+        else
+        {
+          Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+        }
+      }
+
+      if (data.Count < arrayType.GetSize())
+        data.AddRange(new byte[arrayType.GetSize() - data.Count]);
+
+      var value = new CNamedValue(nameNode, arrayType, true);
+      value.homeStackOffset = scope.maxRequiredStackSpace.Value;
+      value.hasStackOffset = true;
+      scope.maxRequiredStackSpace.Value += arrayType.GetSize();
+
+      scope.AddVariable(value);
+      scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
+
+      value.hasPosition = true;
+      value.position.inRegister = false;
+      value.position.stackOffsetForward = value.homeStackOffset;
+    }
+
+    private static void ParseDynamicArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
+    {
+      if (!((nodes[2] as NType).type is BuiltInCType))
+        Error($"Invalid Type '{(nodes[2] as NType).type.ToString()}'. Dynamically Sized Arrays can only contain builtin types.", nodes[2].file, nodes[2].line);
+
+      var builtinType = (nodes[2] as NType).type as BuiltInCType;
+
+      if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
+      {
+        var stringValue = nodes[6] as NStringValue;
+        var arrayType = new ArrayCType(builtinType, stringValue.length);
+        var value = new CNamedValue(nodes[4] as NName, arrayType, true);
+
+        scope.AddVariable(value);
+        scope.instructions.Add(new CInstruction_InitializeArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
+        nodes.RemoveRange(0, 8);
+      }
+      else if (nodes.Count > 6 && nodes[6] is NOpenScope)
+      {
+        long valueCount = 0;
+        List<byte> data = new List<byte>();
+
+        var startNode = nodes[0];
+        var nameNode = (nodes[4] as NName);
+
+        nodes.RemoveRange(0, 7);
+
+        while (true)
+        {
+          if (nodes.Count == 0)
+          {
+            Error("Unexpected end of array definition.", startNode.file, startNode.line);
+          }
+          else if (nodes[0] is NIntegerValue)
+          {
+            valueCount++;
+            data.AddRange(builtinType.GetAsBytes(nodes[0] as NIntegerValue));
+            nodes.RemoveAt(0);
+
+            if (nodes.Count == 0)
+            {
+              Error("Unexpected end of array definition.", startNode.file, startNode.line);
+            }
+            else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+            {
+              nodes.RemoveRange(0, 2);
+              break;
+            }
+            else if (nodes.NextIs(typeof(NComma)))
+            {
+              nodes.RemoveAt(0);
+            }
+            else
+            {
+              Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+            }
+          }
+          else if (nodes.NextIs(typeof(NCloseScope), typeof(NLineEnd)))
+          {
+            nodes.RemoveRange(0, 2);
+            break;
+          }
+          else
+          {
+            Error($"Unexpected {nodes[0]} in array definition.", nodes[0].file, nodes[0].line);
+          }
+        }
+
+        var arrayType = new ArrayCType(builtinType, valueCount);
+        var value = new CNamedValue(nameNode, arrayType, true);
+        value.homeStackOffset = scope.maxRequiredStackSpace.Value;
+        value.hasStackOffset = true;
+        scope.maxRequiredStackSpace.Value += arrayType.GetSize();
+
+        scope.AddVariable(value);
+        scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
+
+        value.hasPosition = true;
+        value.position.inRegister = false;
+        value.position.stackOffsetForward = value.homeStackOffset;
+      }
+    }
+
     private static CValue GetLValue(Scope scope, List<Node> nodes, ref ByteCodeState byteCodeState, CType rValueType = null)
     {
       // variable definition.
@@ -1533,7 +1558,7 @@ namespace llsc
         var type = nodes[0] as NType;
         var name = nodes[1] as NName;
 
-        var value = new CNamedValue(name, type.type, false, false);
+        var value = new CNamedValue(name, type.type, false);
         scope.AddVariable(value);
 
         return value;
@@ -1548,7 +1573,7 @@ namespace llsc
 
         var name = nodes[1] as NName;
 
-        var value = new CNamedValue(name, rValueType, false, false);
+        var value = new CNamedValue(name, rValueType, false);
         scope.AddVariable(value);
 
         return value;
@@ -1872,7 +1897,7 @@ namespace llsc
           {
             case "=":
               {
-                if (left.isConst)
+                if (left.type.isConst)
                   Error($"Cannot assign '{right}' to constant value '{left}'.", operatorNode.file, operatorNode.line);
 
                 scope.instructions.Add(new CInstruction_SetValueTo(left, right, operatorNode.file, operatorNode.line, scope.maxRequiredStackSpace));
@@ -2378,9 +2403,11 @@ namespace llsc
               CValue value = null;
 
               if (registerIndexNode.uint_value < (ulong)IntegerRegisters)
-                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["u64"], true, true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["u64"], true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
               else
-                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["f64"], true, true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+                value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["f64"], true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
+
+              value.type.isConst = true;
 
               scope.instructions.Add(new CInstruction_CustomAction(e => { e.registers[value.position.registerIndex] = value; }, nodes[1].file, nodes[1].line));
 
@@ -2418,8 +2445,9 @@ namespace llsc
       else if (nodes[0] is NStringValue && nodes.Count == 1)
       {
         byte[] bytes = (nodes[0] as NStringValue).bytes;
-        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength), true, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
-        scope.instructions.Add(new CInstruction_SetArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
+        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength), true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
+        inlineString.type.isConst = true;
+        scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
         return inlineString;
       }
       else if (nodes[0] is NNull && nodes.Count == 1)

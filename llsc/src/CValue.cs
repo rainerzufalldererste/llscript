@@ -19,8 +19,6 @@ namespace llsc
 
     public int remainingReferences = 0;
 
-    public bool isConst { get; protected set; }
-
     public int lastTouchedInstructionCount = 0;
 
     private static int lastIndex = 0;
@@ -31,16 +29,15 @@ namespace llsc
 
     }
 
-    public CValue(string file, int line, CType type, bool isConst, bool isInitialized) : base()
+    public CValue(string file, int line, CType type, bool isInitialized) : base()
     {
       this.file = file;
       this.line = line;
       this.type = type;
-      this.isConst = isConst;
       this.isInitialized = isInitialized;
     }
 
-    public override string ToString() => $"unnamed value #{index} [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => $"unnamed value #{index} [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
 
     public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -52,7 +49,6 @@ namespace llsc
       ret.position = position;
       ret.hasPosition = hasPosition;
       ret.remainingReferences = remainingReferences;
-      ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
@@ -81,13 +77,14 @@ namespace llsc
 
     protected CConstIntValue() : base() { }
 
-    public CConstIntValue(ulong value, CType type, string file, int line) : base(file, line, type, true, true)
+    public CConstIntValue(ulong value, CType type, string file, int line) : base(file, line, type, true)
     {
       this.uvalue = value;
       unchecked { this.ivalue = (long)value; }
+      base.type.isConst = true;
     }
 
-    public CConstIntValue(NIntegerValue value, CType type) : base(value.file, value.line, type, true, true)
+    public CConstIntValue(NIntegerValue value, CType type) : base(value.file, value.line, type, true)
     {
       if (!(type is BuiltInCType) || (type as BuiltInCType).IsFloat())
         Compiler.Error($"Invalid Constant Value. Integer value cannot be assigned to type '{ type.ToString() }'.", value.file, value.line);
@@ -132,6 +129,8 @@ namespace llsc
         uvalue = value.uint_value;
 
       ivalue = value.int_value;
+
+      base.type.isConst = true;
     }
 
     public CConstIntValue(NIntegerValue value) : base()
@@ -181,11 +180,15 @@ namespace llsc
       base.file = value.file;
       base.line = value.line;
       base.type = _type;
-      base.isConst = true;
       base.isInitialized = true;
+
+      base.type.isConst = true;
+
+      if (this.smallestPossibleSignedType != null)
+        this.smallestPossibleSignedType.isConst = true;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -197,7 +200,6 @@ namespace llsc
       ret.position = position;
       ret.hasPosition = hasPosition;
       ret.remainingReferences = remainingReferences;
-      ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
@@ -217,22 +219,22 @@ namespace llsc
 
     protected CConstFloatValue() : base() { }
 
-    public CConstFloatValue(double value, CType type, string file, int line) : base(file, line, type, true, true)
+    public CConstFloatValue(double value, CType type, string file, int line) : base(file, line, type, true)
     {
       this.value = value;
+      base.type.isConst = true;
     }
 
-    public CConstFloatValue(NFloatingPointValue value, CType type) : base(value.file, value.line, type, true, true)
+    public CConstFloatValue(NFloatingPointValue value, CType type) : base(value.file, value.line, type, true)
     {
       if (!(type is BuiltInCType) || !(type as BuiltInCType).IsFloat())
         Compiler.Error($"Invalid Constant Value. Floating point value cannot be assigned to type '{ type.ToString() }'.", value.file, value.line);
 
-      var _type = (type as BuiltInCType);
-
       this.value = value.value;
+      base.type.isConst = true;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -241,7 +243,6 @@ namespace llsc
       ret.position = position;
       ret.hasPosition = hasPosition;
       ret.remainingReferences = remainingReferences;
-      ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
@@ -263,17 +264,17 @@ namespace llsc
 
     protected CNamedValue() : base() { }
 
-    public CNamedValue(NName name, CType type, bool isConst, bool isInitialized) : base(name.file, name.line, type, isConst, isInitialized)
+    public CNamedValue(NName name, CType type, bool isInitialized) : base(name.file, name.line, type, isInitialized)
     {
       this.name = name.name;
     }
 
-    public CNamedValue(string name, CType type, bool isConst, bool isInitialized, string file, int line) : base(file, line, type, isConst, isInitialized)
+    public CNamedValue(string name, CType type, bool isInitialized, string file, int line) : base(file, line, type, isInitialized)
     {
       this.name = name;
     }
 
-    public override string ToString() => (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -285,7 +286,6 @@ namespace llsc
       ret.position = position;
       ret.hasPosition = hasPosition;
       ret.remainingReferences = remainingReferences;
-      ret.isConst = isConst;
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
@@ -304,17 +304,17 @@ namespace llsc
   {
     public bool isModified = false;
 
-    public CGlobalValueReference(CType type, string file, int line, bool isConst) : base(file, line, type, isConst, true)
+    public CGlobalValueReference(CType type, string file, int line) : base(file, line, type, true)
     {
 
     }
 
-    public override string ToString() => "unnamed global (?) value [" + (isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => "unnamed global (?) value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
   }
 
   public class CNullValue : CValue
   {
-    public CNullValue(string file, int line) : base(file, line, new PtrCType(VoidCType.Instance), true, true)
+    public CNullValue(string file, int line) : base(file, line, new PtrCType(VoidCType.Instance) { isConst = true }, true)
     {
 
     }

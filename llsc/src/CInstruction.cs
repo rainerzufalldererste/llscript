@@ -158,13 +158,13 @@ namespace llsc
     }
   }
 
-  public class CInstruction_SetArray : CInstruction
+  public class CInstruction_InitializeArray : CInstruction
   {
     private readonly CValue value;
     private readonly byte[] data;
     private readonly SharedValue<long> stackSize;
 
-    public CInstruction_SetArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize) : base(file, line)
+    public CInstruction_InitializeArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize) : base(file, line)
     {
       this.data = data;
       this.value = value;
@@ -200,43 +200,46 @@ namespace llsc
 
       long dataSizeRemaining = data.LongLength;
       int stackPtrRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
-      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
+      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
 
       byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, stackPtrRegister));
 
-      int valueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
-      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true, true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
-
-      long offset = 0;
-
-      byte[] _data = new byte[8];
-
-      while (dataSizeRemaining >= 8)
+      using (var registerLock = byteCodeState.LockRegister(stackPtrRegister))
       {
-        for (int i = 0; i < 8; i++)
-          _data[i] = data[offset + i];
+        int valueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+        byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
 
-        byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
-        byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(stackPtrRegister, valueRegister)); // move register to ptr.
+        long offset = 0;
 
-        dataSizeRemaining -= 8;
-        offset += 8;
+        byte[] _data = new byte[8];
+
+        while (dataSizeRemaining >= 8)
+        {
+          for (int i = 0; i < 8; i++)
+            _data[i] = data[offset + i];
+
+          byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(stackPtrRegister, valueRegister)); // move register to ptr.
+
+          dataSizeRemaining -= 8;
+          offset += 8;
+
+          if (dataSizeRemaining > 0)
+            byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
+        }
 
         if (dataSizeRemaining > 0)
-          byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
+        {
+          for (int i = 0; i < 8 && offset + i < data.LongLength; i++)
+            _data[i] = data[offset + i];
+
+          byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(stackPtrRegister, valueRegister, (byte)dataSizeRemaining)); // move register to ptr.
+        }
+
+        byteCodeState.registers[stackPtrRegister] = null;
+        byteCodeState.registers[valueRegister] = null;
       }
-
-      if (dataSizeRemaining > 0)
-      {
-        for (int i = 0; i < 8 && offset + i < data.LongLength; i++)
-          _data[i] = data[offset + i];
-
-        byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
-        byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(stackPtrRegister, valueRegister, (byte)dataSizeRemaining)); // move register to ptr.
-      }
-
-      byteCodeState.registers[stackPtrRegister] = null;
-      byteCodeState.registers[valueRegister] = null;
     }
   }
 
@@ -460,12 +463,21 @@ namespace llsc
           Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter {function.parameters[i].type} {function.parameters[i].name} is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
       }
 
+
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
-        this.returnValue = new CValue(file, line, function.returnType, true, true) { description = $"Return Value of \"{function}\"" };
+      {
+        this.returnValue = new CValue(file, line, function.returnType, true) { description = $"Return Value of \"{function}\"" };
+        this.returnValue.type.isConst = true;
+      }
       else if (!(function.returnType is VoidCType))
+      {
         throw new NotImplementedException();
+        // this.returnValue.type.isConst = true;
+      }
       else
+      {
         this.returnValue = null;
+      }
 
       returnValue = this.returnValue;
     }
@@ -611,11 +623,19 @@ namespace llsc
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
-        this.returnValue = new CValue(file, line, function.returnType, true, true) { description = $"Return Value of call to function ptr \"{functionPtr}\"" };
+      {
+        this.returnValue = new CValue(file, line, function.returnType, true) { description = $"Return Value of call to function ptr \"{functionPtr}\"" };
+        this.returnValue.type.isConst = true;
+      }
       else if (!(function.returnType is VoidCType))
+      {
         throw new NotImplementedException();
+        // this.returnValue.type.isConst = true;
+      }
       else
+      {
         this.returnValue = null;
+      }
 
       returnValue = this.returnValue;
     }
@@ -781,7 +801,7 @@ namespace llsc
     public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.value = value;
-      this.outValue = outValue = new CGlobalValueReference(new PtrCType(value.type), file, line, false) { description = $"reference to '{value}'" };
+      this.outValue = outValue = new CGlobalValueReference(new PtrCType(value.type), file, line) { description = $"reference to '{value}'" };
       this.stackSize = stackSize;
     }
 
@@ -823,7 +843,7 @@ namespace llsc
         Compiler.Error($"Parameter {nameof(value)} ({value}) to {nameof(CInstruction_ArrayVariableToPtr)} is not an array but {value.type}.", file, line);
 
       this.value = value;
-      this.outValue = outValue = new CGlobalValueReference(new PtrCType((value.type as ArrayCType).type) { explicitCast = value.type.explicitCast }, file, line, false) { description = $"ptr to '{value}'" };
+      this.outValue = outValue = new CGlobalValueReference(new PtrCType((value.type as ArrayCType).type) { explicitCast = value.type.explicitCast }, file, line) { description = $"ptr to '{value}'" };
       this.stackSize = stackSize;
     }
   }
@@ -837,7 +857,7 @@ namespace llsc
     public CInstruction_DereferencePtr(CValue value, out CValue outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.value = value;
-      this.outValue = outValue = new CValue(file, line, ((PtrCType)(value.type)).pointsTo, true, true) { description = $"dereference of '{value}'" };
+      this.outValue = outValue = new CValue(file, line, ((PtrCType)(value.type)).pointsTo, true) { description = $"dereference of '{value}'" };
       this.stackSize = stackSize;
     }
 
@@ -903,7 +923,7 @@ namespace llsc
         throw new Exception("Internal Compiler Error: Unexpected Type.");
 
       this.value = value;
-      this.outValue = outValue = new CValue(file, line, new PtrCType((value.type as ArrayCType).type), false, true) { description = $"reference to '{value}'[0]" };
+      this.outValue = outValue = new CValue(file, line, new PtrCType((value.type as ArrayCType).type), true) { description = $"reference to '{value}'[0]" };
       this.stackSize = stackSize;
     }
 
@@ -1155,7 +1175,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
+        this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -1176,7 +1196,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
+        this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -1197,7 +1217,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = value;
       else
-        this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"({value} + {imm})" };
+        this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
     }
@@ -1256,7 +1276,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = left;
       else
-        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, false, true) { description = $"({left} + {right})" };
+        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, true) { description = $"({left} + {right})" };
 
       if ((left is CConstIntValue || left is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1366,7 +1386,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = left;
       else
-        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, false, true) { description = $"({left} - {right})" };
+        this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, true) { description = $"({left} - {right})" };
 
       resultingValue = this.resultingValue;
     }
@@ -1446,7 +1466,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} * {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, true) { description = $"({lvalue} * {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1544,7 +1564,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} / {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, true) { description = $"({lvalue} / {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1634,7 +1654,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} % {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, true) { description = $"({lvalue} % {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1715,7 +1735,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} & {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, true) { description = $"({lvalue} & {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1805,7 +1825,7 @@ namespace llsc
       if (toSelf)
         this.resultingValue = lvalue;
       else
-        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, false, true) { description = $"({lvalue} {operatorChars} {rvalue})" };
+        this.resultingValue = new CValue(file, line, lvalue.type.GetSize() >= rvalue.type.GetSize() ? lvalue.type : rvalue.type, true) { description = $"({lvalue} {operatorChars} {rvalue})" };
 
       if ((lvalue is CConstIntValue || lvalue is CConstFloatValue) && toSelf)
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
@@ -1915,7 +1935,7 @@ namespace llsc
       this.rvalue = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} == {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} == {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -1970,7 +1990,7 @@ namespace llsc
       this.rvalue = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} != {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} != {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2027,7 +2047,7 @@ namespace llsc
       this.rvalue = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} <= {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} <= {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2084,7 +2104,7 @@ namespace llsc
       this.rvalue = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} >= {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} >= {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2141,7 +2161,7 @@ namespace llsc
       this.right = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} < {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} < {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2196,7 +2216,7 @@ namespace llsc
       this.right = rvalue;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], false, true) { description = $"({lvalue} > {rvalue})" };
+      this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} > {rvalue})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2250,7 +2270,7 @@ namespace llsc
       this.value = value;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"~({value})" };
+      this.resultingValue = new CValue(file, line, value.type, true) { description = $"~({value})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2298,7 +2318,7 @@ namespace llsc
       this.value = value;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"!({value})" };
+      this.resultingValue = new CValue(file, line, value.type, true) { description = $"!({value})" };
 
       resultingValue = this.resultingValue;
     }
@@ -2346,7 +2366,7 @@ namespace llsc
       this.value = value;
       this.stackSize = stackSize;
 
-      this.resultingValue = new CValue(file, line, value.type, false, true) { description = $"-({value})" };
+      this.resultingValue = new CValue(file, line, value.type, true) { description = $"-({value})" };
 
       resultingValue = this.resultingValue;
     }

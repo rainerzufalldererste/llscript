@@ -8,6 +8,7 @@ namespace llsc
   public abstract class CType
   {
     public CType explicitCast = null;
+    public bool isConst = false;
 
     public abstract long GetSize();
 

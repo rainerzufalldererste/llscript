@@ -626,7 +626,7 @@ namespace llsc
               var tempPosition = Position.Register(GetFreeIntegerRegister(stackSize));
               CopyValueToPosition(sourceValue, tempPosition, stackSize);
               TruncateRegister(tempPosition.registerIndex, targetType.GetSize());
-              CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, false, true), targetPosition, stackSize);
+              CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, true), targetPosition, stackSize);
             }
           }
         }

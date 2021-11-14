@@ -194,7 +194,7 @@ namespace llsc
       this.line = line;
       this.name = name;
       this.type = type;
-      this.value = new CNamedValue(name, type, false, true, file, line);
+      this.value = new CNamedValue(name, type, true, file, line);
     }
   }
   public class CBuiltInFunction : CFunction
