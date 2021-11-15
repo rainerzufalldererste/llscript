@@ -1,5 +1,5 @@
-#ifndef llshost_internal_func_h__
-#define llshost_internal_func_h__
+#ifndef llshost_builtin_func_h__
+#define llshost_builtin_func_h__
 
 enum
 {
@@ -10,4 +10,4 @@ enum
   LLS_BF_GET_PROC_ADDRESS
 };
 
-#endif // llshost_internal_func_h__
+#endif // llshost_builtin_func_h__

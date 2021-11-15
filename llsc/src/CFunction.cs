@@ -197,6 +197,7 @@ namespace llsc
       this.value = new CNamedValue(name, type, true, file, line);
     }
   }
+
   public class CBuiltInFunction : CFunction
   {
     public readonly byte builtinFunctionIndex;

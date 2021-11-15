@@ -277,3 +277,4 @@ htCodec/3rdParty/rans_static/lib/*
 enc_temp_folder/*
 builds/*
 * Advisor Result*/
+buildscripts/tmp/*

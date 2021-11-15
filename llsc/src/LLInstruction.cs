@@ -78,6 +78,8 @@ namespace llsc
     LLS_OP_CALL_EXTERNAL__RESULT_TO_REGISTER,
 
     LLS_OP_CALL_BUILTIN__RESULT_TO_REGISTER__ID_FROM_REGISTER,
+
+    LLS_OP_MOV_RUNTIME_PARAM_REGISTER,
   };
 
   public abstract class LLInstruction
@@ -1233,5 +1235,33 @@ namespace llsc
     }
 
     public override string ToString() => $"{ByteCodeInstructions.LLS_OP_JUMP_CMP_TRUE_RELATIVE_IMM} label_0x{label.GetHashCode():X}_at_0x{label.position:X}";
+  }
+
+  public enum LLI_RuntimeParam
+  {
+    LLS_RP_CODE_BASE_PTR = 0,
+    LLS_RP_CODE_INSTRUCTION_PTR,
+    LLS_RP_STACK_BASE_PTR,
+  }
+
+  public class LLI_MovRuntimeParamToRegister : LLInstruction
+  {
+    LLI_RuntimeParam param;
+    byte register;
+
+    public LLI_MovRuntimeParamToRegister(LLI_RuntimeParam param, byte register) : base(1 + 1 + 1)
+    {
+      this.param = param;
+      this.register = register;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_MOV_RUNTIME_PARAM_REGISTER);
+      byteCode.Add((byte)param);
+      byteCode.Add((byte)register);
+    }
+
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_MOV_RUNTIME_PARAM_REGISTER} {(byte)param} ({param}), r:{register}";
   }
 }
