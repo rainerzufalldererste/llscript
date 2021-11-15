@@ -606,20 +606,20 @@ namespace llsc
       var functionType = functionPtr.type;
 
       if (!(functionType is FuncCType || functionType is ExternFuncCType))
-        throw new Exception($"Internal Compiler Error: Attempting to call '{functionType}' which is neither a 'func' nor an 'extern_func'.");
+        throw new Exception($"Internal Compiler Error: Attempting to call '{functionPtr}' which is neither a 'func' nor an 'extern_func'.");
 
       var function = functionType as _FuncCTypeWrapper;
 
       if (arguments.Count != function.parameters.Length)
-        Compiler.Error($"Invalid parameter count for function '{function}'. {arguments.Count} parameters given, {function.parameters.Length} expected.", file, line);
+        Compiler.Error($"Invalid parameter count for function '{functionPtr}'. {arguments.Count} parameters given, {function.parameters.Length} expected.", file, line);
 
       for (int i = 0; i < arguments.Count; i++)
       {
         if (!arguments[i].isInitialized)
-          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' has not been initialized yet. Defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+          Compiler.Error($"In function call to '{functionPtr}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' has not been initialized yet. Defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
 
         if (!arguments[i].type.CanImplicitCastTo(function.parameters[i]))
-          Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+          Compiler.Error($"In function call to '{functionPtr}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)

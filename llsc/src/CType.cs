@@ -24,6 +24,9 @@ namespace llsc
       if (object.ReferenceEquals(a, b))
         return true;
 
+      if (a.isConst != b.isConst)
+        return false;
+
       return a.Equals(b);
     }
 
@@ -34,6 +37,9 @@ namespace llsc
 
       if (object.ReferenceEquals(a, b))
         return false;
+
+      if (a.isConst != b.isConst)
+        return true;
 
       return !a.Equals(b);
     }
@@ -194,7 +200,7 @@ namespace llsc
 
     public override string ToString() => "ptr<" + pointsTo.ToString() + ">";
 
-    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo));
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo) && ((pointsTo.isConst && (type as PtrCType).pointsTo.isConst) || !pointsTo.isConst));
 
     public override bool CanExplicitCastTo(CType type) => type is PtrCType || (type is BuiltInCType && !(type as BuiltInCType).IsFloat() && type.GetSize() == GetSize()) || type is FuncCType || type is ExternFuncCType;
 
@@ -220,7 +226,7 @@ namespace llsc
 
     public override string ToString() => "array<" + type.ToString() + ", " + count + ">";
 
-    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type));
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type && (((type as PtrCType).pointsTo.isConst && this.type.isConst) || !this.type.isConst)));
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || type is PtrCType;
 

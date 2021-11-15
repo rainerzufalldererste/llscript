@@ -8,6 +8,7 @@ namespace llsc
   {
     public List<byte> byteCode = new List<byte>();
     public List<LLInstruction> instructions = new List<LLInstruction>();
+    public List<LLInstruction> postInstructionDataStorage = new List<LLInstruction>();
 
     public CValue[] registers = new CValue[Compiler.IntegerRegisters + Compiler.FloatRegisters];
     public bool[] registerLocked = new bool[Compiler.IntegerRegisters + Compiler.FloatRegisters];
@@ -348,6 +349,9 @@ namespace llsc
 
     public void CompileInstructionsToBytecode()
     {
+      instructions.AddRange(postInstructionDataStorage);
+      postInstructionDataStorage = null;
+
       ulong position = 0;
 
       foreach (var instruction in instructions)

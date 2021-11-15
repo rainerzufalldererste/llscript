@@ -226,6 +226,13 @@ namespace llsc
     public override string ToString() => "'continue'";
   }
 
+  public class NConstKeyword : Node
+  {
+    public NConstKeyword(string file, int line) : base(file, line) { }
+
+    public override string ToString() => "'const'";
+  }
+
   public enum NPseudoFunctionType
   {
     SizeOf,

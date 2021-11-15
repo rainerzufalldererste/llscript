@@ -539,6 +539,10 @@ namespace llsc
               file.nodes[i] = new NContinueKeyword(node.file, node.line);
               break;
 
+            case "const":
+              file.nodes[i] = new NConstKeyword(node.file, node.line);
+              break;
+
             case "sizeof":
             case "countof":
             case "addressof":
@@ -937,6 +941,20 @@ namespace llsc
         else if (nodes.NextIs(typeof(NType), typeof(NName), typeof(NOperator), typeof(NOpenScope)) && ((nodes[0] as NType).type is ArrayCType && (nodes[2] as NOperator).operatorType == "="))
         {
           ParseFixedSizeArrayInitialization(scope, ref nodes, false);
+        }
+        // Const Dynamic Array.
+        else if (nodes.NextIs(typeof(NConstKeyword), typeof(NArrayKeyword), typeof(NOperator), typeof(NType), typeof(NOperator), typeof(NName), typeof(NOperator)) && ((nodes[2] as NOperator).operatorType == "<" && (nodes[4] as NOperator).operatorType == ">" && (nodes[6] as NOperator).operatorType == "="))
+        {
+          nodes.RemoveAt(0); // Remove `const`.
+
+          ParseDynamicArrayInitialization(scope, ref nodes, true);
+        }
+        // Const Fixed size array.
+        else if (nodes.NextIs(typeof(NConstKeyword), typeof(NType), typeof(NName), typeof(NOperator), typeof(NOpenScope)) && ((nodes[1] as NType).type is ArrayCType && (nodes[3] as NOperator).operatorType == "="))
+        {
+          nodes.RemoveAt(0); // Remove `const`.
+
+          ParseFixedSizeArrayInitialization(scope, ref nodes, true);
         }
         else if (nodes[0] is NIfKeyword)
         {
@@ -1454,6 +1472,12 @@ namespace llsc
       if (data.Count < arrayType.GetSize())
         data.AddRange(new byte[arrayType.GetSize() - data.Count]);
 
+      if (isConst)
+      {
+        arrayType.isConst = true;
+        arrayType.type.isConst = true;
+      }
+
       var value = new CNamedValue(nameNode, arrayType, true);
       value.homeStackOffset = scope.maxRequiredStackSpace.Value;
       value.hasStackOffset = true;
@@ -1477,7 +1501,7 @@ namespace llsc
       if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
       {
         var stringValue = nodes[6] as NStringValue;
-        var arrayType = new ArrayCType(builtinType, stringValue.length);
+        var arrayType = new ArrayCType(builtinType, stringValue.length) { isConst = isConst };
         var value = new CNamedValue(nodes[4] as NName, arrayType, true);
 
         scope.AddVariable(value);
@@ -1536,6 +1560,13 @@ namespace llsc
         }
 
         var arrayType = new ArrayCType(builtinType, valueCount);
+
+        if (isConst)
+        {
+          arrayType.isConst = true;
+          arrayType.type.isConst = true;
+        }
+
         var value = new CNamedValue(nameNode, arrayType, true);
         value.homeStackOffset = scope.maxRequiredStackSpace.Value;
         value.hasStackOffset = true;
@@ -2445,7 +2476,7 @@ namespace llsc
       else if (nodes[0] is NStringValue && nodes.Count == 1)
       {
         byte[] bytes = (nodes[0] as NStringValue).bytes;
-        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength), true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
+        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength) { isConst = true }, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
         inlineString.type.isConst = true;
         scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
         return inlineString;
@@ -2483,6 +2514,7 @@ namespace llsc
           }
           else
           {
+            Error($"Unknown token '{nameNode}'. Expected variable name.", nameNode.file, nameNode.line);
             throw new NotImplementedException();
           }
         }
