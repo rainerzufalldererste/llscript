@@ -84,7 +84,7 @@ namespace llsc
         byteCodeState.registers[i] = null;
 
       foreach (var parameter in function.parameters)
-        if (parameter.value.position.inRegister)
+        if (parameter.value.position.type == PositionType.InRegister)
           byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
 
       foreach (var param in function.parameters)
@@ -129,7 +129,7 @@ namespace llsc
         byteCodeState.registers[i] = null;
 
       foreach (var parameter in function.parameters)
-        if (parameter.value.position.inRegister)
+        if (parameter.value.position.type == PositionType.InRegister)
           byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
 
       byteCodeState.instructions.Add(new LLI_StackDecrementImm(function.scope.maxRequiredStackSpace, 0));
@@ -170,7 +170,7 @@ namespace llsc
       this.value = value;
       this.stackSize = stackSize;
 
-      if (value.hasPosition && value.position.inRegister)
+      if (value.hasPosition && value.position.type == PositionType.InRegister)
         throw new Exception("Internal Compiler Error.");
 
       value.isInitialized = true;
@@ -178,8 +178,7 @@ namespace llsc
       if (!value.hasPosition)
       {
         value.hasPosition = true;
-        value.position.inRegister = false;
-        value.position.stackOffsetForward = stackSize.Value;
+        value.position = Position.StackOffset(stackSize.Value);
 
         if (value is CNamedValue)
         {
@@ -273,7 +272,7 @@ namespace llsc
           throw new Exception($"Internal Compiler Error: Source Value {sourceValue} has no position.");
 
       // if setting the target to a temp value.
-      if (!(sourceValue is CNamedValue) && sourceValue.hasPosition && sourceValue.position.inRegister)
+      if (!(sourceValue is CNamedValue) && sourceValue.hasPosition && sourceValue.position.type == PositionType.InRegister)
       {
         targetValue.hasPosition = true;
         targetValue.position = sourceValue.position;
@@ -316,16 +315,14 @@ namespace llsc
         if (!(targetValue.type is ArrayCType) && targetValue.type.GetSize() <= 8)
         {
           // Move to register.
-          targetValue.position.inRegister = true;
-          targetValue.position.registerIndex = targetValue.type is BuiltInCType && (targetValue.type as BuiltInCType).IsFloat() ? byteCodeState.GetFreeFloatRegister(stackSize) : byteCodeState.GetFreeIntegerRegister(stackSize);
+          targetValue.position = Position.Register(targetValue.type is BuiltInCType && (targetValue.type as BuiltInCType).IsFloat() ? byteCodeState.GetFreeFloatRegister(stackSize) : byteCodeState.GetFreeIntegerRegister(stackSize));
 
           byteCodeState.registers[targetValue.position.registerIndex] = targetValue;
         }
         else
         {
           // Place on stack.
-          targetValue.position.inRegister = false;
-          targetValue.position.stackOffsetForward = stackSize.Value;
+          targetValue.position = Position.StackOffset(stackSize.Value);
 
           if (targetValue is CNamedValue)
           {
@@ -343,7 +340,7 @@ namespace llsc
       byteCodeState.CopyValueToPosition(sourceValue, targetValue.position, stackSize);
       byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
 
-      if (targetValue.position.inRegister && targetValue is CNamedValue)
+      if (targetValue.position.type == PositionType.InRegister && targetValue is CNamedValue)
       {
         var t = targetValue as CNamedValue;
 
@@ -410,7 +407,7 @@ namespace llsc
           {
             int targetPtrRegister = byteCodeState.MoveValueToAnyRegister(targetValuePtr, stackSize);
 
-            if (sourceValue.position.inRegister)
+            if (sourceValue.position.type == PositionType.InRegister)
               throw new Exception("Internal Compiler Error!");
 
             byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, sourcePtrRegister));
@@ -513,8 +510,7 @@ namespace llsc
                 value.modifiedSinceLastHome = false;
               }
 
-              value.position.inRegister = false;
-              value.position.stackOffsetForward = value.homeStackOffset;
+              value.position = Position.StackOffset(value.homeStackOffset);
               byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
             }
             else
@@ -555,15 +551,14 @@ namespace llsc
 
       if (function is CBuiltInFunction)
       {
-        Position targetPosition = new Position() { inRegister = true, registerIndex = 0 };
+        Position targetPosition = Position.Register(0);
 
         byteCodeState.MoveValueToPosition(new CConstIntValue((function as CBuiltInFunction).builtinFunctionIndex, BuiltInCType.Types["u8"], file, line), targetPosition, stackSize, true);
 
         if (!(function.returnType is VoidCType))
         {
           returnValue.hasPosition = true;
-          returnValue.position.inRegister = true;
-          returnValue.position.registerIndex = 0;
+          returnValue.position = Position.Register(0);
         }
 
         byteCodeState.instructions.Add(new LLI_CallBuiltInFunction_IDFromRegister_ResultToRegister(0, 0));
@@ -656,7 +651,7 @@ namespace llsc
         if (!functionPtr.hasPosition)
           throw new Exception("Internal Compiler Error. Function Ptr has no Position.");
 
-        if (functionPtr.position.inRegister)
+        if (functionPtr.position.type == PositionType.InRegister)
           chosenIntRegister = functionPtr.position.registerIndex;
 
         var function = functionPtr.type as ExternFuncCType;
@@ -704,7 +699,7 @@ namespace llsc
         byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(functionPtr, stackSize, byteCodeState));
 
         // Function Pointer.
-        if (functionPtr.position.inRegister)
+        if (functionPtr.position.type == PositionType.InRegister)
         {
           if (byteCodeState.registers[functionPtr.position.registerIndex] != functionPtr)
             throw new Exception("Internal Compiler Error!");
@@ -714,11 +709,15 @@ namespace llsc
           byteCodeState.instructions.Add(new LLI_PushRegister((byte)functionPtr.position.registerIndex));
           pushedBytes += 8;
         }
-        else
+        else if (functionPtr.position.type == PositionType.OnStack)
         {
           byteCodeState.instructions.Add(new LLI_MovStackOffsetToStackOffset(stackSize, functionPtr.position.stackOffsetForward + pushedBytes, new SharedValue<long>(0), 0));
           byteCodeState.instructions.Add(new LLI_StackIncrementImm(8));
           pushedBytes += 8;
+        }
+        else
+        {
+          throw new NotImplementedException();
         }
 
         // Type of return value.
@@ -777,8 +776,7 @@ namespace llsc
         else
         {
           returnValue.hasPosition = true;
-          returnValue.position.inRegister = true;
-          returnValue.position.registerIndex = returnValueRegister;
+          returnValue.position = Position.Register(returnValueRegister);
 
           byteCodeState.registers[returnValueRegister] = returnValue;
         }
@@ -819,7 +817,7 @@ namespace llsc
         value.homeStackOffset = value.position.stackOffsetForward;
         value.modifiedSinceLastHome = false;
       }
-      else if (value.hasPosition & value.position.inRegister)
+      else if (value.hasPosition && value.position.type == PositionType.InRegister)
       {
         byteCodeState.MoveValueToHome(value, stackSize);
       }
@@ -941,7 +939,7 @@ namespace llsc
         value.homeStackOffset = value.position.stackOffsetForward;
         value.modifiedSinceLastHome = false;
       }
-      else if (value.hasPosition & value.position.inRegister)
+      else if (value.hasPosition && value.position.type == PositionType.InRegister)
       {
         byteCodeState.MoveValueToHome(value, stackSize);
       }
@@ -971,7 +969,7 @@ namespace llsc
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
-      if (source.hasPosition && source.position.inRegister)
+      if (source.hasPosition && source.position.type == PositionType.InRegister)
       {
         if (byteCodeState.registers[source.position.registerIndex] != source)
           throw new Exception("Internal Compiler Error: Register Index not actually referenced.");
@@ -991,7 +989,7 @@ namespace llsc
       {
         byteCodeState.MoveValueToHome(source as CNamedValue, stackSize);
       }
-      else if (source.hasPosition && source.position.inRegister && source.remainingReferences > 0)
+      else if (source.hasPosition && source.position.type == PositionType.InRegister && source.remainingReferences > 0)
       {
         var newPosition = Position.StackOffset(stackSize.Value);
         stackSize.Value += source.type.GetSize();
@@ -1051,8 +1049,7 @@ namespace llsc
                 value.modifiedSinceLastHome = false;
               }
 
-              value.position.inRegister = false;
-              value.position.stackOffsetForward = value.homeStackOffset;
+              value.position = Position.StackOffset(value.homeStackOffset);
               byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
             }
             else
@@ -1119,8 +1116,7 @@ namespace llsc
               value.modifiedSinceLastHome = false;
             }
 
-            value.position.inRegister = false;
-            value.position.stackOffsetForward = value.homeStackOffset;
+            value.position = Position.StackOffset(value.homeStackOffset);
             byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
           }
           else
@@ -1136,8 +1132,7 @@ namespace llsc
             else
               byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, scope.maxRequiredStackSpace, value.homeStackOffset, (int)size));
 
-            value.position.inRegister = false;
-            value.position.stackOffsetForward = value.homeStackOffset;
+            value.position = Position.StackOffset(value.homeStackOffset);
             byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
           }
         }
@@ -1250,8 +1245,7 @@ namespace llsc
       {
         byteCodeState.registers[registerIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = registerIndex;
+        resultingValue.position = Position.Register(registerIndex);
       }
     }
   }
@@ -1357,8 +1351,7 @@ namespace llsc
         {
           byteCodeState.registers[leftRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = leftRegisterIndex;
+          resultingValue.position = Position.Register(leftRegisterIndex);
         }
 
         byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(resultingValue, stackSize, byteCodeState));
@@ -1439,8 +1432,7 @@ namespace llsc
         {
           byteCodeState.registers[leftRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = leftRegisterIndex;
+          resultingValue.position = Position.Register(leftRegisterIndex);
         }
       }
     }
@@ -1537,8 +1529,7 @@ namespace llsc
         {
           byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position = Position.Register(lvalueRegisterIndex);
         }
       }
     }
@@ -1627,8 +1618,7 @@ namespace llsc
         {
           byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position = Position.Register(lvalueRegisterIndex);
         }
       }
     }
@@ -1708,8 +1698,7 @@ namespace llsc
         {
           byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position = Position.Register(lvalueRegisterIndex);
         }
       }
     }
@@ -1796,8 +1785,7 @@ namespace llsc
         {
           byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position = Position.Register(lvalueRegisterIndex);
         }
       }
     }
@@ -1871,8 +1859,7 @@ namespace llsc
         {
           byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
           resultingValue.hasPosition = true;
-          resultingValue.position.inRegister = true;
-          resultingValue.position.registerIndex = lvalueRegisterIndex;
+          resultingValue.position = Position.Register(lvalueRegisterIndex);
         }
       }
     }
@@ -1969,8 +1956,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2026,8 +2012,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2083,8 +2068,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2140,8 +2124,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2195,8 +2178,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2250,8 +2232,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2298,8 +2279,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2346,8 +2326,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }
@@ -2394,8 +2373,7 @@ namespace llsc
 
         byteCodeState.registers[lvalueRegisterIndex] = resultingValue;
         resultingValue.hasPosition = true;
-        resultingValue.position.inRegister = true;
-        resultingValue.position.registerIndex = lvalueRegisterIndex;
+        resultingValue.position = Position.Register(lvalueRegisterIndex);
       }
     }
   }

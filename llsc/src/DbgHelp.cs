@@ -100,13 +100,27 @@ namespace llsc
       List<byte> bytes = new List<byte>();
 
       bytes.Add((byte)type);
-      bytes.Add(position.inRegister ? (byte)1 : (byte)0);
-      bytes.Add(isVariable ? (byte)1 : (byte)0) ;
+      bytes.Add((byte)position.type);
+      bytes.Add(isVariable ? (byte)1 : (byte)0);
 
-      if (position.inRegister)
-        bytes.AddRange(BitConverter.GetBytes((ulong)position.registerIndex));
-      else
-        bytes.AddRange(BitConverter.GetBytes(stackSize.Value - position.stackOffsetForward));
+      switch (position.type)
+      {
+        case PositionType.InRegister:
+          bytes.AddRange(BitConverter.GetBytes((ulong)position.registerIndex));
+          break;
+          
+        case PositionType.OnStack:
+          bytes.AddRange(BitConverter.GetBytes(stackSize.Value - position.stackOffsetForward));
+          break;
+          
+        case PositionType.StackBaseOffset:
+          bytes.AddRange(BitConverter.GetBytes(position.stackBaseOffset));
+          break;
+          
+        case PositionType.CodeBaseOffset:
+          bytes.AddRange(BitConverter.GetBytes(position.codeBaseOffset.position));
+          break;
+      }
 
       bytes.AddRange(Encoding.UTF8.GetBytes(name));
       bytes.Add(0);

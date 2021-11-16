@@ -2,17 +2,27 @@
 
 namespace llsc
 {
+  public enum PositionType
+  {
+    OnStack,
+    InRegister,
+    StackBaseOffset,
+    CodeBaseOffset,
+  }
+
   public struct Position
   {
-    public bool inRegister;
+    public PositionType type;
     public int registerIndex;
     public long stackOffsetForward;
+    public long stackBaseOffset;
+    public LLI_Label_PseudoInstruction codeBaseOffset;
 
     public static Position Register(int registerIndex)
     {
       Position ret = new Position();
 
-      ret.inRegister = true;
+      ret.type = PositionType.InRegister;
       ret.registerIndex = registerIndex;
 
       return ret;
@@ -22,7 +32,7 @@ namespace llsc
     {
       Position ret = new Position();
 
-      ret.inRegister = false;
+      ret.type = PositionType.OnStack;
       ret.stackOffsetForward = stackOffsetForward;
 
       return ret;
@@ -30,10 +40,23 @@ namespace llsc
 
     public override string ToString()
     {
-      if (inRegister)
-        return $"r:{registerIndex}";
+      switch (type)
+      {
+        case PositionType.InRegister:
+          return $"r:{registerIndex}";
 
-      return $"stackOffsetForward:{stackOffsetForward}";
+        case PositionType.OnStack:
+          return $"stackOffsetForward:{stackOffsetForward}";
+
+        case PositionType.StackBaseOffset:
+          return $"stackBaseOffset:{stackBaseOffset}";
+
+        case PositionType.CodeBaseOffset:
+          return $"codeBaseOffset:({codeBaseOffset.description})" + (codeBaseOffset.position != 0 ? $" @{codeBaseOffset.position}" : "");
+
+        default:
+          throw new Exception("Invalid Position Type. Internal Compiler Error.");
+      }
     }
   }
 }

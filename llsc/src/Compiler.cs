@@ -1487,8 +1487,7 @@ namespace llsc
       scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
 
       value.hasPosition = true;
-      value.position.inRegister = false;
-      value.position.stackOffsetForward = value.homeStackOffset;
+      value.position = Position.StackOffset(value.homeStackOffset);
     }
 
     private static void ParseDynamicArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
@@ -1576,8 +1575,7 @@ namespace llsc
         scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
 
         value.hasPosition = true;
-        value.position.inRegister = false;
-        value.position.stackOffsetForward = value.homeStackOffset;
+        value.position = Position.StackOffset(value.homeStackOffset);
       }
     }
 

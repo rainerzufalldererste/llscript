@@ -166,13 +166,25 @@ namespace llsc
 
       locationInfo = new DbgLocationInfo(value, stackSize);
 
-      if (value.position.inRegister && byteCodeState.registers[value.position.registerIndex] != value)
+      if (value.position.type == PositionType.InRegister && byteCodeState.registers[value.position.registerIndex] != value)
         throw new Exception("Internal Compiler Error: Value not available in specified register.");
     }
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
 
-    public override string ToString() => $"# Value Location: '{(!locationInfo.isVariable ? "(" : "") + locationInfo.name + (!locationInfo.isVariable ? ")" : "")}' " + (locationInfo.position.inRegister ? $"r:{ locationInfo.position.registerIndex }" : $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}");
+    public override string ToString()
+    {
+      string ret = $"# Value Location: '{(!locationInfo.isVariable ? "(" : "") + locationInfo.name + (!locationInfo.isVariable ? ")" : "")}' ";
+
+      switch (locationInfo.position.type)
+      {
+        case PositionType.OnStack:
+          return ret + $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}";
+
+        default:
+          return ret + position.ToString();
+      }
+    }
   }
 
   public class LLI_JumpToLabel : LLInstruction
