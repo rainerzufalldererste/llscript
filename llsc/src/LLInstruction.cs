@@ -187,6 +187,38 @@ namespace llsc
     }
   }
 
+  public class LLI_Data_PseudoInstruction : LLI_PseudoInstruction
+  {
+    public string description;
+    public byte[] data;
+
+    public LLI_Data_PseudoInstruction(string description, byte[] data) : base((ulong)data.LongLength)
+    {
+      this.description = description;
+      this.data = data;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.AddRange(data);
+    }
+
+    public override string ToString()
+    {
+      string ret = $"# Data Segment: '{description}'\n\n";
+
+      for (long i = 0; i < data.LongLength; i += 16)
+      {
+        for (long j = 0; j < 16; j++)
+          ret += data[i + j].ToString("X2") + " ";
+
+        ret += "\n";
+      }
+
+      return ret;
+    }
+  }
+
   public class LLI_JumpToLabel : LLInstruction
   {
     readonly LLI_Label_PseudoInstruction label;

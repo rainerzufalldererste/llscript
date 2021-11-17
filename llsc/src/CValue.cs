@@ -257,10 +257,11 @@ namespace llsc
   public class CNamedValue : CValue
   {
     public string name { get; protected set; }
-    public bool hasStackOffset = false;
-    public long homeStackOffset;
+    public bool hasHomePosition = false;
+    public Position homePosition;
     public bool modifiedSinceLastHome = false;
     public bool isVolatile = false;
+    public bool isStatic = false;
 
     protected CNamedValue() : base() { }
 
@@ -290,8 +291,7 @@ namespace llsc
       ret.description = description;
 
       ret.name = name;
-      ret.hasStackOffset = false;
-      ret.homeStackOffset = 0;
+      ret.hasHomePosition = false;
       ret.modifiedSinceLastHome = false;
 
       scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));

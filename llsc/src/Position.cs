@@ -15,8 +15,8 @@ namespace llsc
     public PositionType type;
     public int registerIndex;
     public long stackOffsetForward;
-    public long stackBaseOffset;
-    public LLI_Label_PseudoInstruction codeBaseOffset;
+    public long globalStackBaseOffset;
+    public LLI_Data_PseudoInstruction codeBaseOffset;
 
     public static Position Register(int registerIndex)
     {
@@ -49,7 +49,7 @@ namespace llsc
           return $"stackOffsetForward:{stackOffsetForward}";
 
         case PositionType.StackBaseOffset:
-          return $"stackBaseOffset:{stackBaseOffset}";
+          return $"stackBaseOffset:{globalStackBaseOffset}";
 
         case PositionType.CodeBaseOffset:
           return $"codeBaseOffset:({codeBaseOffset.description})" + (codeBaseOffset.position != 0 ? $" @{codeBaseOffset.position}" : "");

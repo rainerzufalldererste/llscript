@@ -1479,15 +1479,15 @@ namespace llsc
       }
 
       var value = new CNamedValue(nameNode, arrayType, true);
-      value.homeStackOffset = scope.maxRequiredStackSpace.Value;
-      value.hasStackOffset = true;
+      value.homePosition = Position.StackOffset(scope.maxRequiredStackSpace.Value);
+      value.hasHomePosition = true;
       scope.maxRequiredStackSpace.Value += arrayType.GetSize();
 
       scope.AddVariable(value);
       scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
 
       value.hasPosition = true;
-      value.position = Position.StackOffset(value.homeStackOffset);
+      value.position = value.homePosition;
     }
 
     private static void ParseDynamicArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
@@ -1567,15 +1567,15 @@ namespace llsc
         }
 
         var value = new CNamedValue(nameNode, arrayType, true);
-        value.homeStackOffset = scope.maxRequiredStackSpace.Value;
-        value.hasStackOffset = true;
+        value.homePosition = Position.StackOffset(scope.maxRequiredStackSpace.Value);
+        value.hasHomePosition = true;
         scope.maxRequiredStackSpace.Value += arrayType.GetSize();
 
         scope.AddVariable(value);
         scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
 
         value.hasPosition = true;
-        value.position = Position.StackOffset(value.homeStackOffset);
+        value.position = value.homePosition;
       }
     }
 

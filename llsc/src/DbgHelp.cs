@@ -114,7 +114,7 @@ namespace llsc
           break;
           
         case PositionType.StackBaseOffset:
-          bytes.AddRange(BitConverter.GetBytes(position.stackBaseOffset));
+          bytes.AddRange(BitConverter.GetBytes(position.globalStackBaseOffset));
           break;
           
         case PositionType.CodeBaseOffset:
@@ -269,7 +269,8 @@ namespace llsc
         }
         else if (instruction is LLI_PseudoInstruction)
         {
-          current.comments.Add(instruction.ToString());
+          if (!(instruction is LLI_Data_PseudoInstruction))
+            current.comments.Add(instruction.ToString());
 
           continue;
         }

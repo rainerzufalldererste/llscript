@@ -71,11 +71,11 @@ namespace llsc
         if (registerLocked[i])
           continue;
 
-        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        if (registers[i] is CNamedValue && (registers[i] as CNamedValue).hasHomePosition)
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i].position = (registers[i] as CNamedValue).homePosition;
             registers[i] = null;
             return i;
           }
@@ -134,11 +134,11 @@ namespace llsc
         if (registerLocked[i])
           continue;
 
-        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset)
+        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasHomePosition)
         {
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i].position = (registers[i] as CNamedValue).homePosition;
             registers[i] = null;
             return i;
           }
@@ -188,10 +188,10 @@ namespace llsc
         }
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
+        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasHomePosition && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i].position = (registers[i] as CNamedValue).homePosition;
             registers[i] = null;
             return i;
           }
@@ -214,10 +214,10 @@ namespace llsc
         }
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasStackOffset && !registerLocked[i])
+        if (registers[i] != null && registers[i] is CNamedValue && (registers[i] as CNamedValue).hasHomePosition && !registerLocked[i])
           if (!(registers[i] as CNamedValue).modifiedSinceLastHome)
           {
-            registers[i].position = Position.StackOffset((registers[i] as CNamedValue).homeStackOffset);
+            registers[i].position = (registers[i] as CNamedValue).homePosition;
             registers[i] = null;
             return i;
           }
@@ -230,9 +230,9 @@ namespace llsc
       if (registers[register] == null || registers[register].remainingReferences == 0)
         return;
 
-      if (registers[register] is CNamedValue && (registers[register] as CNamedValue).hasStackOffset && !(registers[register] as CNamedValue).modifiedSinceLastHome)
+      if (registers[register] is CNamedValue && (registers[register] as CNamedValue).hasHomePosition && !(registers[register] as CNamedValue).modifiedSinceLastHome)
       {
-        registers[register].position = Position.StackOffset((registers[register] as CNamedValue).homeStackOffset);
+        registers[register].position = (registers[register] as CNamedValue).homePosition;
         registers[register] = null;
         return;
       }
@@ -265,14 +265,21 @@ namespace llsc
       {
         var namedValue = registers[register] as CNamedValue;
 
-        if (namedValue.hasStackOffset)
+        if (namedValue.hasHomePosition)
         {
-          if (size == 8)
-            instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, namedValue.homeStackOffset));
+          if (namedValue.homePosition.type == PositionType.OnStack)
+          {
+            if (namedValue.type.GetSize() == 8)
+              instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, namedValue.homePosition.stackOffsetForward));
+            else
+              instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, namedValue.homePosition.stackOffsetForward, (int)namedValue.type.GetSize()));
+          }
           else
-            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, namedValue.homeStackOffset, (byte)size));
+          {
+            throw new NotImplementedException();
+          }
 
-          namedValue.position = Position.StackOffset(namedValue.homeStackOffset);
+          namedValue.position = namedValue.homePosition;
           namedValue.modifiedSinceLastHome = false;
           registers[register] = null;
 
@@ -280,15 +287,17 @@ namespace llsc
         }
         else
         {
+          if (namedValue.isStatic)
+            throw new NotImplementedException(); // This isn't necessarily not defined, but will need careful selection based on optimization parameters, type being const, etc.
+
           if (size == 8)
             instructions.Add(new LLI_MovRegisterToStackOffset(register, stackSize, stackSize.Value));
           else
             instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(register, stackSize, stackSize.Value, (byte)size));
 
-          namedValue.hasStackOffset = true;
-          namedValue.homeStackOffset = stackSize.Value;
-
-          namedValue.position = Position.StackOffset(namedValue.homeStackOffset);
+          namedValue.hasHomePosition = true;
+          namedValue.homePosition = Position.StackOffset(stackSize.Value);
+          namedValue.position = namedValue.homePosition;
           namedValue.modifiedSinceLastHome = false;
           registers[register] = null;
 
@@ -489,7 +498,7 @@ namespace llsc
 
             sourceValue.lastTouchedInstructionCount = instructions.Count;
           }
-          else if (targetPosition.type == PositionType.OnStack)
+          else if (sourceValue.position.type == PositionType.OnStack)
           {
             var bytes = sourceValue.type.GetSize();
 
@@ -508,7 +517,7 @@ namespace llsc
             throw new NotImplementedException();
           }
         }
-        else
+        else if (targetPosition.type == PositionType.OnStack)
         {
           if (sourceValue.position.type == PositionType.InRegister)
           {
@@ -556,6 +565,10 @@ namespace llsc
           {
             throw new NotImplementedException();
           }
+        }
+        else
+        {
+          throw new NotImplementedException();
         }
       }
 
@@ -728,28 +741,28 @@ namespace llsc
       if (!value.hasPosition)
         throw new Exception("Internal Compiler Error");
 
-      if (value.hasStackOffset && value.position.type != PositionType.InRegister && value.position.stackOffsetForward != value.homeStackOffset)
+      if (value.hasHomePosition && value.position.type == PositionType.OnStack && value.position.stackOffsetForward != value.homePosition.stackOffsetForward)
         throw new Exception("Internal Compiler Error");
 
       if (value.position.type != PositionType.InRegister)
         return;
 
-      if (!value.hasStackOffset)
+      if (!value.hasHomePosition)
       {
-        value.hasStackOffset = true;
-        value.homeStackOffset = stackSize.Value;
+        value.hasHomePosition = true;
+        value.homePosition = Position.StackOffset(stackSize.Value);
         stackSize.Value += value.type.GetSize();
         value.modifiedSinceLastHome = true;
       }
 
       if (!value.modifiedSinceLastHome)
       {
-        value.position = Position.StackOffset(value.homeStackOffset);
+        value.position = value.homePosition;
         instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
         return;
       }
 
-      Position position = Position.StackOffset(value.homeStackOffset);
+      Position position = value.homePosition;
 
       MoveValueToPosition(value, position, stackSize, false);
 
@@ -857,7 +870,7 @@ namespace llsc
             throw new NotImplementedException();
           }
         }
-        else if (position.type == PositionType.OnStack)
+        else if (sourceValue.position.type == PositionType.OnStack)
         {
           if (position.type == PositionType.InRegister)
           {
@@ -892,6 +905,67 @@ namespace llsc
       CopyValueToPosition(value, Position.Register(registerIndex), stackSize);
 
       return registerIndex;
+    }
+
+    public void BackupRegisterValues(SharedValue<long> stackSize)
+    {
+      instructions.Add(new LLI_Comment_PseudoInstruction("Backup Register Values."));
+
+      for (byte i = 0; i < registers.Length; i++)
+      {
+        if (registers[i] == null)
+          continue;
+
+        if (registers[i] is CNamedValue)
+        {
+          var value = registers[i] as CNamedValue;
+
+          if (value.hasHomePosition)
+          {
+            if (value.modifiedSinceLastHome)
+            {
+              if (value.homePosition.type == PositionType.OnStack)
+              {
+                if (value.type.GetSize() == 8)
+                  instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homePosition.stackOffsetForward));
+                else
+                  instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homePosition.stackOffsetForward, (int)value.type.GetSize()));
+              }
+              else
+              {
+                throw new NotImplementedException();
+              }
+
+              value.modifiedSinceLastHome = false;
+            }
+
+            value.position = value.homePosition;
+            instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+          }
+          else
+          {
+            if (value.isStatic)
+              throw new NotImplementedException(); // This isn't necessarily not defined, but will need careful selection based on optimization parameters, type being const, etc.
+
+            value.homePosition = Position.StackOffset(stackSize.Value);
+            value.hasHomePosition = true;
+            value.modifiedSinceLastHome = false;
+            value.hasPosition = true;
+            value.position = value.homePosition;
+            var size = value.type.GetSize();
+            stackSize.Value += size;
+
+            if (value.type.GetSize() == 8)
+              instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homePosition.stackOffsetForward));
+            else
+              instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homePosition.stackOffsetForward, (int)size));
+
+            instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+          }
+        }
+
+        registers[i] = null;
+      }
     }
   }
 }

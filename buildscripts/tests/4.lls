@@ -26,7 +26,7 @@ while (valueof(pIndex) < sizeof(__block))
   i8 byte = __block[valueof(pIndex)];
 
   u32 _unused;
-  writeFileAFunc(stdOutHandle, outlut[cast<u64>(byte) * 2], 2, addressof(_unused), null);
+  writeFileAFunc(stdOutHandle, outlut + cast<u64>(byte) * 2, 2, addressof(_unused), null);
 
-  valueof(pIndex)++;
+  valueof(pIndex) = valueof(pIndex) + 1;
 }

@@ -184,8 +184,8 @@ namespace llsc
         {
           var t = value as CNamedValue;
 
-          t.hasStackOffset = true;
-          t.homeStackOffset = value.position.stackOffsetForward;
+          t.hasHomePosition = true;
+          t.homePosition = value.position;
           t.modifiedSinceLastHome = false;
         }
 
@@ -278,7 +278,7 @@ namespace llsc
         targetValue.position = sourceValue.position;
         targetValue.isInitialized = true;
 
-        if (targetValue is CNamedValue && (targetValue as CNamedValue).hasStackOffset)
+        if (targetValue is CNamedValue && (targetValue as CNamedValue).hasHomePosition)
           (targetValue as CNamedValue).modifiedSinceLastHome = true;
 
         byteCodeState.registers[sourceValue.position.registerIndex] = targetValue;
@@ -328,8 +328,8 @@ namespace llsc
           {
             var t = targetValue as CNamedValue;
 
-            t.hasStackOffset = true;
-            t.homeStackOffset = targetValue.position.stackOffsetForward;
+            t.hasHomePosition = true;
+            t.homePosition = targetValue.position;
             t.modifiedSinceLastHome = false;
           }
 
@@ -344,7 +344,7 @@ namespace llsc
       {
         var t = targetValue as CNamedValue;
 
-        if (t.hasStackOffset)
+        if (t.hasHomePosition)
           t.modifiedSinceLastHome = true;
       }
     }
@@ -486,55 +486,7 @@ namespace llsc
       function.ResetRegisterPositions();
 
       // Backup Registers.
-      {
-        byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("Backup Register Values."));
-
-        for (byte i = 0; i < byteCodeState.registers.Length; i++)
-        {
-          if (byteCodeState.registers[i] == null)
-            continue;
-
-          if (byteCodeState.registers[i] is CNamedValue)
-          {
-            var value = byteCodeState.registers[i] as CNamedValue;
-
-            if (value.hasStackOffset)
-            {
-              if (value.modifiedSinceLastHome)
-              {
-                if (value.type.GetSize() == 8)
-                  byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homeStackOffset));
-                else
-                  byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homeStackOffset, (int)value.type.GetSize()));
-
-                value.modifiedSinceLastHome = false;
-              }
-
-              value.position = Position.StackOffset(value.homeStackOffset);
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
-            }
-            else
-            {
-              value.homeStackOffset = stackSize.Value;
-              value.hasStackOffset = true;
-              value.modifiedSinceLastHome = false;
-              value.hasPosition = true;
-              value.position = Position.StackOffset(value.homeStackOffset);
-              var size = value.type.GetSize();
-              stackSize.Value += size;
-
-              if (value.type.GetSize() == 8)
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homeStackOffset));
-              else
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homeStackOffset, (int)size));
-
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
-            }
-          }
-
-          byteCodeState.registers[i] = null;
-        }
-      }
+      byteCodeState.BackupRegisterValues(stackSize);
 
       for (int i = arguments.Count - 1; i >= 0; i--)
       {
@@ -813,8 +765,8 @@ namespace llsc
         value.position = Position.StackOffset(stackSize.Value);
         stackSize.Value += value.type.GetSize();
         value.hasPosition = true;
-        value.hasStackOffset = true;
-        value.homeStackOffset = value.position.stackOffsetForward;
+        value.hasHomePosition = true;
+        value.homePosition = value.position;
         value.modifiedSinceLastHome = false;
       }
       else if (value.hasPosition && value.position.type == PositionType.InRegister)
@@ -935,8 +887,8 @@ namespace llsc
         value.position = Position.StackOffset(stackSize.Value);
         stackSize.Value += value.type.GetSize();
         value.hasPosition = true;
-        value.hasStackOffset = true;
-        value.homeStackOffset = value.position.stackOffsetForward;
+        value.hasHomePosition = true;
+        value.homePosition = value.position;
         value.modifiedSinceLastHome = false;
       }
       else if (value.hasPosition && value.position.type == PositionType.InRegister)
@@ -1025,55 +977,7 @@ namespace llsc
       byteCodeState.instructions.Add(new LLI_CmpNotEq_ImmRegister(BitConverter.GetBytes((long)0), registerIndex));
 
       if (backupRegisters)
-      {
-        byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("Backup Register Values."));
-
-        for (byte i = 0; i < byteCodeState.registers.Length; i++)
-        {
-          if (byteCodeState.registers[i] == null)
-            continue;
-
-          if (byteCodeState.registers[i] is CNamedValue)
-          {
-            var value = byteCodeState.registers[i] as CNamedValue;
-
-            if (value.hasStackOffset)
-            {
-              if (value.modifiedSinceLastHome)
-              {
-                if (value.type.GetSize() == 8)
-                  byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homeStackOffset));
-                else
-                  byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homeStackOffset, (int)value.type.GetSize()));
-
-                value.modifiedSinceLastHome = false;
-              }
-
-              value.position = Position.StackOffset(value.homeStackOffset);
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
-            }
-            else
-            {
-              value.homeStackOffset = stackSize.Value;
-              value.hasStackOffset = true;
-              value.modifiedSinceLastHome = false;
-              value.hasPosition = true;
-              value.position = Position.StackOffset(value.homeStackOffset);
-              var size = value.type.GetSize();
-              stackSize.Value += size;
-
-              if (value.type.GetSize() == 8)
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, stackSize, value.homeStackOffset));
-              else
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, stackSize, value.homeStackOffset, (int)size));
-
-              byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
-            }
-          }
-
-          byteCodeState.registers[i] = null;
-        }
-      }
+        byteCodeState.BackupRegisterValues(stackSize);
 
       byteCodeState.instructions.Add(new LLI_JumpIfTrue_Imm(label));
     }
@@ -1093,56 +997,7 @@ namespace llsc
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
-      byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("Store Register Values."));
-
-      for (byte i = 0; i < byteCodeState.registers.Length; i++)
-      {
-        if (byteCodeState.registers[i] == null)
-          continue;
-
-        if (byteCodeState.registers[i] is CNamedValue && scope.GetVariable((byteCodeState.registers[i] as CNamedValue).name) == byteCodeState.registers[i])
-        {
-          var value = byteCodeState.registers[i] as CNamedValue;
-
-          if (value.hasStackOffset)
-          {
-            if (value.modifiedSinceLastHome)
-            {
-              if (value.type.GetSize() == 8)
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, scope.maxRequiredStackSpace, value.homeStackOffset));
-              else
-                byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, scope.maxRequiredStackSpace, value.homeStackOffset, (int)value.type.GetSize()));
-
-              value.modifiedSinceLastHome = false;
-            }
-
-            value.position = Position.StackOffset(value.homeStackOffset);
-            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
-          }
-          else
-          {
-            value.homeStackOffset = scope.maxRequiredStackSpace.Value;
-            value.hasStackOffset = true;
-            value.modifiedSinceLastHome = false;
-            var size = value.type.GetSize();
-            scope.maxRequiredStackSpace.Value += size;
-
-            if (value.type.GetSize() == 8)
-              byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset(i, scope.maxRequiredStackSpace, value.homeStackOffset));
-            else
-              byteCodeState.instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(i, scope.maxRequiredStackSpace, value.homeStackOffset, (int)size));
-
-            value.position = Position.StackOffset(value.homeStackOffset);
-            byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, scope.maxRequiredStackSpace, byteCodeState));
-          }
-        }
-        else
-        {
-          byteCodeState.registers[i].hasPosition = false;
-        }
-
-        byteCodeState.registers[i] = null;
-      }
+      byteCodeState.BackupRegisterValues(scope.maxRequiredStackSpace);
     }
   }
 
