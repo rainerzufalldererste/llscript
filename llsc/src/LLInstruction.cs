@@ -207,7 +207,9 @@ namespace llsc
     {
       string ret = $"# Data Segment: '{description}'\n\n";
 
-      for (long i = 0; i < data.LongLength; i += 16)
+      long i = 0;
+
+      for (; i < data.LongLength - 16; i += 16)
       {
         for (long j = 0; j < 16; j++)
           ret += data[i + j].ToString("X2") + " ";
@@ -215,6 +217,10 @@ namespace llsc
         ret += "\n";
       }
 
+      if (i < data.LongLength)
+        for (; i < data.LongLength; i++)
+          ret += data[i].ToString("X2") + " ";
+     
       return ret;
     }
   }
@@ -634,6 +640,27 @@ namespace llsc
     }
 
     public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_IMM} r:{register}, {value.ElementsToString("X2")}";
+  }
+
+  public class LLI_AddImmInstructionOffset : LLInstruction
+  {
+    int register;
+    LLInstruction instruction;
+
+    public LLI_AddImmInstructionOffset(int register, LLInstruction instruction) : base(1 + 1 + 8)
+    {
+      this.register = register;
+      this.instruction = instruction;
+    }
+
+    public override void AppendBytecode(ref List<byte> byteCode)
+    {
+      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_ADD_IMM);
+      byteCode.Add((byte)register);
+      byteCode.AddRange(BitConverter.GetBytes(instruction.position));
+    }
+
+    public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_IMM} r:{register}, {BitConverter.GetBytes(instruction.position).ElementsToString("X2")} (offset of instruction at 0x{instruction.position:X})";
   }
 
   public class LLI_AddRegister : LLInstruction

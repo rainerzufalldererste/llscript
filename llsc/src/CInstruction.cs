@@ -163,22 +163,48 @@ namespace llsc
     private readonly CValue value;
     private readonly byte[] data;
     private readonly SharedValue<long> stackSize;
+    private readonly Scope scope;
 
-    public CInstruction_InitializeArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize) : base(file, line)
+    public CInstruction_InitializeArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize, Scope parentScope) : base(file, line)
     {
       this.data = data;
       this.value = value;
       this.stackSize = stackSize;
+      this.scope = parentScope;
 
       if (value.hasPosition && value.position.type == PositionType.InRegister)
         throw new Exception("Internal Compiler Error.");
 
       value.isInitialized = true;
+    }
 
+    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
+    {
       if (!value.hasPosition)
       {
         value.hasPosition = true;
-        value.position = Position.StackOffset(stackSize.Value);
+
+        if (value.type.isConst || (value.type as ArrayCType).type.isConst || (value is CNamedValue && (value as CNamedValue).isStatic && Compiler.Assumptions.ByteCodeMutable))
+        {
+          value.position = Position.CodeBaseOffset(value, data, file, line);
+        }
+        else if (value is CNamedValue && (value as CNamedValue).isStatic)
+        {
+          Scope motherScope = scope;
+
+          while (motherScope.parentScope != null)
+            motherScope = motherScope.parentScope;
+
+          value.position = Position.GlobalStackBaseOffset(motherScope.maxRequiredStackSpace.Value);
+
+          motherScope.maxRequiredStackSpace.Value += value.type.GetSize();
+        }
+        else
+        {
+          value.position = Position.StackOffset(stackSize.Value);
+
+          stackSize.Value += value.type.GetSize();
+        }
 
         if (value is CNamedValue)
         {
@@ -188,57 +214,83 @@ namespace llsc
           t.homePosition = value.position;
           t.modifiedSinceLastHome = false;
         }
-
-        stackSize.Value += value.type.GetSize();
       }
-    }
 
-    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
-    {
       byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, byteCodeState));
 
-      long dataSizeRemaining = data.LongLength;
-      int stackPtrRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
-      byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
-
-      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, stackPtrRegister));
-
-      using (var registerLock = byteCodeState.LockRegister(stackPtrRegister))
+      switch (value.position.type)
       {
-        int valueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
-        byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
+        case PositionType.CodeBaseOffset:
+          {
+            byteCodeState.postInstructionDataStorage.Add(value.position.codeBaseOffset);
+            break;
+          }
 
-        long offset = 0;
+        case PositionType.OnStack:
+        case PositionType.GlobalStackOffset:
+          {
+            long dataSizeRemaining = data.LongLength;
+            int stackPtrRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+            byteCodeState.registers[stackPtrRegister] = new CValue(file, line, new PtrCType(BuiltInCType.Types["u64"]), true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
 
-        byte[] _data = new byte[8];
+            if (value.position.type == PositionType.OnStack)
+            {
+              byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, stackPtrRegister));
+            }
+            else if (value.position.type == PositionType.GlobalStackOffset)
+            {
+              byteCodeState.instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, (byte)stackPtrRegister));
+              byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes(value.position.globalStackBaseOffset)));
+            }
+            else
+            {
+              throw new NotImplementedException();
+            }
 
-        while (dataSizeRemaining >= 8)
-        {
-          for (int i = 0; i < 8; i++)
-            _data[i] = data[offset + i];
+            using (var registerLock = byteCodeState.LockRegister(stackPtrRegister))
+            {
+              int valueRegister = byteCodeState.GetFreeIntegerRegister(stackSize);
+              byteCodeState.registers[stackPtrRegister] = new CValue(file, line, BuiltInCType.Types["u64"], true) { remainingReferences = 1, lastTouchedInstructionCount = byteCodeState.instructions.Count };
 
-          byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
-          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(stackPtrRegister, valueRegister)); // move register to ptr.
+              long offset = 0;
 
-          dataSizeRemaining -= 8;
-          offset += 8;
+              byte[] _data = new byte[8];
 
-          if (dataSizeRemaining > 0)
-            byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
-        }
+              while (dataSizeRemaining >= 8)
+              {
+                for (int i = 0; i < 8; i++)
+                  _data[i] = data[offset + i];
 
-        if (dataSizeRemaining > 0)
-        {
-          for (int i = 0; i < 8 && offset + i < data.LongLength; i++)
-            _data[i] = data[offset + i];
+                byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+                byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister(stackPtrRegister, valueRegister)); // move register to ptr.
 
-          byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
-          byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(stackPtrRegister, valueRegister, (byte)dataSizeRemaining)); // move register to ptr.
-        }
+                dataSizeRemaining -= 8;
+                offset += 8;
 
-        byteCodeState.registers[stackPtrRegister] = null;
-        byteCodeState.registers[valueRegister] = null;
+                if (dataSizeRemaining > 0)
+                  byteCodeState.instructions.Add(new LLI_AddImm(stackPtrRegister, BitConverter.GetBytes((ulong)8))); // inc ptr by 8.
+              }
+
+              if (dataSizeRemaining > 0)
+              {
+                for (int i = 0; i < 8 && offset + i < data.LongLength; i++)
+                  _data[i] = data[offset + i];
+
+                byteCodeState.instructions.Add(new LLI_MovImmToRegister(valueRegister, _data.ToArray())); // move value to register.
+                byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(stackPtrRegister, valueRegister, (byte)dataSizeRemaining)); // move register to ptr.
+              }
+
+              byteCodeState.registers[stackPtrRegister] = null;
+              byteCodeState.registers[valueRegister] = null;
+            }
+
+            break;
+          }
+
+        default:
+          throw new Exception("Invalid Position Type for array.");
       }
+
     }
   }
 

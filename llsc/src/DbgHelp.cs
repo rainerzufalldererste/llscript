@@ -113,7 +113,7 @@ namespace llsc
           bytes.AddRange(BitConverter.GetBytes(stackSize.Value - position.stackOffsetForward));
           break;
           
-        case PositionType.StackBaseOffset:
+        case PositionType.GlobalStackOffset:
           bytes.AddRange(BitConverter.GetBytes(position.globalStackBaseOffset));
           break;
           

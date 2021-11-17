@@ -597,7 +597,26 @@ namespace llsc
             throw new Exception($"Internal Compiler Error: sourceValue {sourceValue} doesn't have a position.");
 
           FreeRegister(targetPosition.registerIndex, stackSize);
-          instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, targetPosition.registerIndex));
+
+          switch (sourceValue.position.type)
+          {
+            case PositionType.OnStack:
+              instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, targetPosition.registerIndex));
+              break;
+
+            case PositionType.CodeBaseOffset:
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, (byte)targetPosition.registerIndex));
+              instructions.Add(new LLI_AddImmInstructionOffset(targetPosition.registerIndex, sourceValue.position.codeBaseOffset));
+              break;
+
+            case PositionType.GlobalStackOffset:
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, (byte)targetPosition.registerIndex));
+              instructions.Add(new LLI_AddImm(targetPosition.registerIndex, BitConverter.GetBytes((ulong)sourceValue.position.globalStackBaseOffset)));
+              break;
+
+            default:
+              throw new NotImplementedException();
+          }
 
           sourceValue.lastTouchedInstructionCount = instructions.Count;
           registers[targetPosition.registerIndex] = sourceValue;

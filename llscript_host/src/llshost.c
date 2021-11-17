@@ -153,11 +153,19 @@ typedef enum
   DT_F64Array
 } DebugDatabaseVariableType;
 
+enum
+{
+  PT_OnStack,
+  PT_InRegister,
+  PT_GlobalStackOffset,
+  PT_CodeBaseOffset,
+} DebugDatabasePositionType;
+
 #pragma pack(1)
 typedef struct
 {
   uint8_t type;
-  bool inRegister;
+  uint8_t positionType;
   bool isVariable;
   uint64_t position;
   char name[];
@@ -230,15 +238,15 @@ void ResetConsoleColour()
     SetConsoleTextAttribute(stdOutHandle, GetWindowsConsoleColourFromConsoleColour(CC_BrightGray) | (GetWindowsConsoleColourFromConsoleColour(CC_Black) << 8));
 }
 
-bool _IsBadReadPtr(const void *pPtr, const size_t size)
+bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBase, const uint8_t *pCodeBase)
 {
-  if ((size_t)pPtr >= 0x00007FF000000000 && (size_t)pPtr < 0x00007FFFFFFFFFFF)
+  if (((size_t)pPtr >= 0x00007FF000000000 && (size_t)pPtr < 0x00007FFFFFFFFFFF) || (pPtr > pStackBase && pPtr < pStackBase + 1024 * 1024) || (pPtr > pCodeBase && pPtr < pCodeBase + 1024 * 1024))
     return IsBadReadPtr(pPtr, size);
 
   return true;
 }
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister);
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
 
 #else
 #define LOG_INSTRUCTION_NAME(x)
@@ -436,7 +444,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (recentValues[i].pLocation == NULL)
             continue;
 
-          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, pStack, iregister, fregister);
+          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
           recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -2146,7 +2154,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (recentValues[i].pLocation == NULL)
             continue;
 
-          PrintVariableInfo(recentValues[i].pLocation, false, pStack, iregister, fregister);
+          PrintVariableInfo(recentValues[i].pLocation, false, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
           recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -2168,7 +2176,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           DebugDatabaseVariableLocation *pVariableInfo = (uint8_t *)pEntry + entryDataOffset + pEntry->offsets[pEntry->codeCount + pEntry->commentCount + i];
 
           if (!stepByLine)
-            PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister);
+            PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           if (pVariableInfo->isVariable)
           {
@@ -2185,7 +2193,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               }
               else
               {
-                if (recentValues[j].pLocation->inRegister && pVariableInfo->inRegister && recentValues[j].pLocation->position == pVariableInfo->position)
+                if (recentValues[j].pLocation->positionType == PT_InRegister && pVariableInfo->positionType == PT_InRegister && recentValues[j].pLocation->position == pVariableInfo->position)
                 {
                   recentValues[j].pLocation = NULL;
                   replaceByAge = j;
@@ -2457,7 +2465,7 @@ uint8_t llshost_from_state(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister)
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
 {
   fflush(stdout);
   SetConsoleColour(isNewReference ? CC_BrightCyan : CC_BrightBlue, CC_Black);
@@ -2467,89 +2475,114 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
   fflush(stdout);
   SetConsoleColour(isNewReference ? CC_DarkCyan : CC_DarkBlue, CC_Black);
 
-  if (pVariableInfo->inRegister)
-    printf(" @ register %" PRIu64 " ", pVariableInfo->position);
-  else
+  const void *pLocation = NULL;
+
+  switch (pVariableInfo->positionType)
+  {
+  case PT_OnStack:
     printf(" @ stack offset %" PRIi64 " ", (int64_t)pVariableInfo->position);
+    pLocation = pStack - pVariableInfo->position;
+    break;
+
+  case PT_InRegister:
+    printf(" @ register %" PRIu64 " ", pVariableInfo->position);
+    pLocation = pVariableInfo->position >= LLS_IREGISTER_COUNT ? (const void *)&pFRegister[pVariableInfo->position - LLS_IREGISTER_COUNT] : (const void *)&pIRegister[pVariableInfo->position];
+    break;
+
+  case PT_GlobalStackOffset:
+    printf(" @ global stack offset %" PRIu64 " ", pVariableInfo->position);
+    pLocation = pStackBase + pVariableInfo->position;
+    break;
+
+  case PT_CodeBaseOffset:
+    printf(" @ code base offset %" PRIu64 " ", pVariableInfo->position);
+    pLocation = pCodeBase + pVariableInfo->position;
+    break;
+
+  default:
+    puts(" <UNSUPPORTED/INVALID POSITION DESCRIPTION>");
+    ResetConsoleColour();
+    return;
+  }
 
   switch (pVariableInfo->type)
   {
   case DT_U8:
   {
-    uint8_t value = pVariableInfo->inRegister ? (uint8_t)pIRegister[pVariableInfo->position] : *(uint8_t *)(pStack - pVariableInfo->position);
+    uint8_t value = *(uint8_t *)pLocation;
     printf(" (u8) : %" PRIu8 " / %02" PRIX8 "\n", value, value);
     break;
   }
 
   case DT_I8:
   {
-    int8_t value = pVariableInfo->inRegister ? (int8_t)pIRegister[pVariableInfo->position] : *(int8_t *)(pStack - pVariableInfo->position);
+    int8_t value = *(int8_t *)pLocation;
     printf(" (i8) : %" PRIi8 " / %02" PRIX8 "\n", value, value);
     break;
   }
 
   case DT_U16:
   {
-    uint16_t value = pVariableInfo->inRegister ? (uint16_t)pIRegister[pVariableInfo->position] : *(uint16_t *)(pStack - pVariableInfo->position);
+    uint16_t value = *(uint16_t *)pLocation;
     printf(" (u16) : %" PRIu16 " / %04" PRIX16 "\n", value, value);
     break;
   }
 
   case DT_I16:
   {
-    int16_t value = pVariableInfo->inRegister ? (int16_t)pIRegister[pVariableInfo->position] : *(int16_t *)(pStack - pVariableInfo->position);
+    int16_t value = *(int16_t *)pLocation;
     printf(" (i16) : %" PRIi16 " / %04" PRIX16 "\n", value, value);
     break;
   }
 
   case DT_U32:
   {
-    uint32_t value = pVariableInfo->inRegister ? (uint32_t)pIRegister[pVariableInfo->position] : *(uint32_t *)(pStack - pVariableInfo->position);
+    uint32_t value = *(uint32_t *)pLocation;
     printf(" (u32) : %" PRIu32 " / %08" PRIX32 "\n", value, value);
     break;
   }
 
   case DT_I32:
   {
-    int32_t value = pVariableInfo->inRegister ? (int32_t)pIRegister[pVariableInfo->position] : *(int32_t *)(pStack - pVariableInfo->position);
+    int32_t value = *(int32_t *)pLocation;
     printf(" (i32) : %" PRIi32 " / %08" PRIX32 "\n", value, value);
     break;
   }
 
   case DT_U64:
   {
-    uint64_t value = pVariableInfo->inRegister ? (uint64_t)pIRegister[pVariableInfo->position] : *(uint64_t *)(pStack - pVariableInfo->position);
+    uint64_t value = *(uint64_t *)pLocation;
     printf(" (u64) : %" PRIu64 " / %016" PRIX64 "\n", value, value);
     break;
   }
 
   case DT_I64:
   {
-    int64_t value = pVariableInfo->inRegister ? (int64_t)pIRegister[pVariableInfo->position] : *(int64_t *)(pStack - pVariableInfo->position);
+    int64_t value = *(int64_t *)pLocation;
     printf(" (i64) : %" PRIi64 " / %016" PRIX64 "\n", value, value);
     break;
   }
 
   case DT_F32:
   {
-    float value = pVariableInfo->inRegister ? (float)pFRegister[pVariableInfo->position - LLS_IREGISTER_COUNT] : *(float *)(pStack - pVariableInfo->position);
+    float value = *(float *)pLocation;
     printf(" (f32) : %e / %f\n", value, value);
     break;
   }
 
   case DT_F64:
   {
-    double value = pVariableInfo->inRegister ? (double)pFRegister[pVariableInfo->position - LLS_IREGISTER_COUNT] : *(double *)(pStack - pVariableInfo->position);
+    double value = *(double *)pLocation;
     printf(" (f64) : %e / %f\n", value, value);
     break;
   }
 
   case DT_OtherPtr:
   {
-    uint8_t *pValue = pVariableInfo->inRegister ? (uint8_t *)pIRegister[pVariableInfo->position] : *(uint8_t **)(pStack - pVariableInfo->position);
+    const uint8_t *pValue = *(uint8_t **)pLocation;
     printf(" (ptr<other>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 32))
+    if (_IsBadReadPtr(pValue, 32, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2584,10 +2617,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U8Ptr:
   {
-    uint8_t *pValue = pVariableInfo->inRegister ? (uint8_t *)pIRegister[pVariableInfo->position] : *(uint8_t **)(pStack - pVariableInfo->position);
+    const uint8_t *pValue = *(uint8_t **)pLocation;
     printf(" (ptr<u8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2604,10 +2637,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I8Ptr:
   {
-    int8_t *pValue = pVariableInfo->inRegister ? (int8_t *)pIRegister[pVariableInfo->position] : *(int8_t **)(pStack - pVariableInfo->position);
+    const int8_t *pValue = *(int8_t **)pLocation;
     printf(" (ptr<i8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2642,10 +2675,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U16Ptr:
   {
-    uint16_t *pValue = pVariableInfo->inRegister ? (uint16_t *)pIRegister[pVariableInfo->position] : *(uint16_t **)(pStack - pVariableInfo->position);
+    const uint16_t *pValue = *(uint16_t **)pLocation;
     printf(" (ptr<u16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2662,10 +2695,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I16Ptr:
   {
-    int16_t *pValue = pVariableInfo->inRegister ? (int16_t *)pIRegister[pVariableInfo->position] : *(int16_t **)(pStack - pVariableInfo->position);
+    const int16_t *pValue = *(int16_t **)pLocation;
     printf(" (ptr<i16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2682,10 +2715,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U32Ptr:
   {
-    uint32_t *pValue = pVariableInfo->inRegister ? (uint32_t *)pIRegister[pVariableInfo->position] : *(uint32_t **)(pStack - pVariableInfo->position);
+    const uint32_t *pValue = *(uint32_t **)pLocation;
     printf(" (ptr<u32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2702,10 +2735,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I32Ptr:
   {
-    int32_t *pValue = pVariableInfo->inRegister ? (int32_t *)pIRegister[pVariableInfo->position] : *(int32_t **)(pStack - pVariableInfo->position);
+    const int32_t *pValue = *(int32_t **)pLocation;
     printf(" (ptr<i32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2722,10 +2755,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U64Ptr:
   {
-    uint64_t *pValue = pVariableInfo->inRegister ? (uint64_t *)pIRegister[pVariableInfo->position] : *(uint64_t **)(pStack - pVariableInfo->position);
+    const uint64_t *pValue = *(uint64_t **)pLocation;
     printf(" (ptr<u64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2742,10 +2775,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I64Ptr:
   {
-    int64_t *pValue = pVariableInfo->inRegister ? (int64_t *)pIRegister[pVariableInfo->position] : *(int64_t **)(pStack - pVariableInfo->position);
+    const int64_t *pValue = *(int64_t **)pLocation;
     printf(" (ptr<i64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2762,10 +2795,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_F32Ptr:
   {
-    float *pValue = pVariableInfo->inRegister ? (float *)pIRegister[pVariableInfo->position] : *(float **)(pStack - pVariableInfo->position);
+    const float *pValue = *(float **)pLocation;
     printf(" (ptr<f32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2782,10 +2815,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_F64Ptr:
   {
-    double *pValue = pVariableInfo->inRegister ? (double *)pIRegister[pVariableInfo->position] : *(double **)(pStack - pVariableInfo->position);
+    const double *pValue = *(double **)pLocation;
     printf(" (ptr<f64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2802,10 +2835,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_OtherArray:
   {
-    uint8_t *pValue = pVariableInfo->inRegister ? (uint8_t *)pIRegister[pVariableInfo->position] : (uint8_t *)(pStack - pVariableInfo->position);
+    const uint8_t *pValue = (uint8_t *)pLocation;
     printf(" (array<other>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2840,10 +2873,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U8Array:
   {
-    uint8_t *pValue = pVariableInfo->inRegister ? (uint8_t *)pIRegister[pVariableInfo->position] : (uint8_t *)(pStack - pVariableInfo->position);
+    const uint8_t *pValue = (uint8_t *)pLocation;
     printf(" (array<u8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2860,10 +2893,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I8Array:
   {
-    int8_t *pValue = pVariableInfo->inRegister ? (int8_t *)pIRegister[pVariableInfo->position] : (int8_t *)(pStack - pVariableInfo->position);
+    const int8_t *pValue = (int8_t *)pLocation;
     printf(" (array<i8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2898,10 +2931,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U16Array:
   {
-    uint16_t *pValue = pVariableInfo->inRegister ? (uint16_t *)pIRegister[pVariableInfo->position] : (uint16_t *)(pStack - pVariableInfo->position);
+    const uint16_t *pValue = (uint16_t *)pLocation;
     printf(" (array<u16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2918,10 +2951,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I16Array:
   {
-    int16_t *pValue = pVariableInfo->inRegister ? (int16_t *)pIRegister[pVariableInfo->position] : (int16_t *)(pStack - pVariableInfo->position);
+    const int16_t *pValue = (int16_t *)pLocation;
     printf(" (array<i16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2938,10 +2971,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U32Array:
   {
-    uint32_t *pValue = pVariableInfo->inRegister ? (uint32_t *)pIRegister[pVariableInfo->position] : (uint32_t *)(pStack - pVariableInfo->position);
+    const uint32_t *pValue = (uint32_t *)pLocation;
     printf(" (array<u32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2958,10 +2991,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I32Array:
   {
-    int32_t *pValue = pVariableInfo->inRegister ? (int32_t *)pIRegister[pVariableInfo->position] : (int32_t *)(pStack - pVariableInfo->position);
+    const int32_t *pValue = (int32_t *)pLocation;
     printf(" (array<i32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2978,10 +3011,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_U64Array:
   {
-    uint64_t *pValue = pVariableInfo->inRegister ? (uint64_t *)pIRegister[pVariableInfo->position] : (uint64_t *)(pStack - pVariableInfo->position);
+    const uint64_t *pValue = (uint64_t *)pLocation;
     printf(" (array<u64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2998,10 +3031,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_I64Array:
   {
-    int64_t *pValue = pVariableInfo->inRegister ? (int64_t *)pIRegister[pVariableInfo->position] : (int64_t *)(pStack - pVariableInfo->position);
+    const int64_t *pValue = (int64_t *)pLocation;
     printf(" (array<i64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3018,10 +3051,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_F32Array:
   {
-    float *pValue = pVariableInfo->inRegister ? (float *)pIRegister[pVariableInfo->position] : (float *)(pStack - pVariableInfo->position);
+    const float *pValue = (float *)pLocation;
     printf(" (array<f32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3038,10 +3071,10 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
 
   case DT_F64Array:
   {
-    double *pValue = pVariableInfo->inRegister ? (double *)pIRegister[pVariableInfo->position] : (double *)(pStack - pVariableInfo->position);
+    const double *pValue = (double *)pLocation;
     printf(" (array<f64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24))
+    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }

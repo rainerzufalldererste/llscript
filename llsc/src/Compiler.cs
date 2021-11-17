@@ -1223,7 +1223,7 @@ namespace llsc
             var value = GetLValue(scope, lnodes, ref byteCodeState);
 
             if (value != null && value.type != null && value.type is ArrayCType)
-              scope.instructions.Add(new CInstruction_InitializeArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace));
+              scope.instructions.Add(new CInstruction_InitializeArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace, scope));
           }
           // `++`, `--`.
           else if (nextEndLine == firstOperator + 1)
@@ -1417,6 +1417,7 @@ namespace llsc
       var startNode = nodes[0] as NType;
       var arrayType = startNode.type as ArrayCType;
       var builtinType = arrayType.type as BuiltInCType;
+      bool isStatic = isConst || scope.parentScope == null;
 
       nodes.RemoveRange(0, 4);
 
@@ -1479,15 +1480,10 @@ namespace llsc
       }
 
       var value = new CNamedValue(nameNode, arrayType, true);
-      value.homePosition = Position.StackOffset(scope.maxRequiredStackSpace.Value);
-      value.hasHomePosition = true;
-      scope.maxRequiredStackSpace.Value += arrayType.GetSize();
+      value.isStatic = isStatic;
 
       scope.AddVariable(value);
-      scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
-
-      value.hasPosition = true;
-      value.position = value.homePosition;
+      scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace, scope));
     }
 
     private static void ParseDynamicArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
@@ -1496,15 +1492,16 @@ namespace llsc
         Error($"Invalid Type '{(nodes[2] as NType).type.ToString()}'. Dynamically Sized Arrays can only contain builtin types.", nodes[2].file, nodes[2].line);
 
       var builtinType = (nodes[2] as NType).type as BuiltInCType;
+      bool isStatic = isConst || scope.parentScope == null;
 
       if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
       {
         var stringValue = nodes[6] as NStringValue;
         var arrayType = new ArrayCType(builtinType, stringValue.length) { isConst = isConst };
-        var value = new CNamedValue(nodes[4] as NName, arrayType, true);
+        var value = new CNamedValue(nodes[4] as NName, arrayType, true) { isStatic = isStatic };
 
         scope.AddVariable(value);
-        scope.instructions.Add(new CInstruction_InitializeArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
+        scope.instructions.Add(new CInstruction_InitializeArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace, scope));
         nodes.RemoveRange(0, 8);
       }
       else if (nodes.Count > 6 && nodes[6] is NOpenScope)
@@ -1567,15 +1564,14 @@ namespace llsc
         }
 
         var value = new CNamedValue(nameNode, arrayType, true);
-        value.homePosition = Position.StackOffset(scope.maxRequiredStackSpace.Value);
-        value.hasHomePosition = true;
-        scope.maxRequiredStackSpace.Value += arrayType.GetSize();
+        value.isStatic = isStatic;
 
         scope.AddVariable(value);
-        scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
-
-        value.hasPosition = true;
-        value.position = value.homePosition;
+        scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace, scope));
+      }
+      else
+      {
+        Error($"Unexpected Token combination in dynamic array initialization: '{nodes[0]}' ...", nodes[0].file, nodes[0].line);
       }
     }
 
@@ -2476,7 +2472,9 @@ namespace llsc
         byte[] bytes = (nodes[0] as NStringValue).bytes;
         CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength) { isConst = true }, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
         inlineString.type.isConst = true;
-        scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
+
+        scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace, scope));
+
         return inlineString;
       }
       else if (nodes[0] is NNull && nodes.Count == 1)

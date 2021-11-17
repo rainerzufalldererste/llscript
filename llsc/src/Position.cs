@@ -6,7 +6,7 @@ namespace llsc
   {
     OnStack,
     InRegister,
-    StackBaseOffset,
+    GlobalStackOffset,
     CodeBaseOffset,
   }
 
@@ -38,6 +38,26 @@ namespace llsc
       return ret;
     }
 
+    public static Position GlobalStackBaseOffset(long stackBaseOffset)
+    {
+      Position ret = new Position();
+
+      ret.type = PositionType.GlobalStackOffset;
+      ret.globalStackBaseOffset = stackBaseOffset;
+
+      return ret;
+    }
+
+    public static Position CodeBaseOffset(CValue value, byte[] data, string file, int line)
+    {
+      Position ret = new Position();
+
+      ret.type = PositionType.CodeBaseOffset;
+      ret.codeBaseOffset = new LLI_Data_PseudoInstruction($"{value} defined in {value.file}:{value.line + 1} (assigned in {file}:{line + 1})", data);
+
+      return ret;
+    }
+
     public override string ToString()
     {
       switch (type)
@@ -48,7 +68,7 @@ namespace llsc
         case PositionType.OnStack:
           return $"stackOffsetForward:{stackOffsetForward}";
 
-        case PositionType.StackBaseOffset:
+        case PositionType.GlobalStackOffset:
           return $"stackBaseOffset:{globalStackBaseOffset}";
 
         case PositionType.CodeBaseOffset:
