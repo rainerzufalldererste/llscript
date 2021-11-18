@@ -797,14 +797,16 @@ namespace llsc
     protected CNamedValue value;
     protected CGlobalValueReference outValue;
     protected SharedValue<long> stackSize;
+    protected Scope scope;
 
     protected CInstruction_AddressOfVariable(string file, int line) : base(file, line) { }
 
-    public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
+    public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line, Scope scope) : base(file, line)
     {
       this.value = value;
       this.outValue = outValue = new CGlobalValueReference(new PtrCType(value.type), file, line) { description = $"reference to '{value}'" };
       this.stackSize = stackSize;
+      this.scope = scope;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -814,8 +816,28 @@ namespace llsc
 
       if (!value.hasPosition)
       {
-        value.position = Position.StackOffset(stackSize.Value);
-        stackSize.Value += value.type.GetSize();
+        if (value.type.isConst || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable))
+        {
+          value.position = Position.CodeBaseOffset(value, new byte[value.type.GetSize()], file, line);
+          byteCodeState.postInstructionDataStorage.Add(value.position.codeBaseOffset);
+        }
+        else if (value.isStatic)
+        {
+          Scope motherScope = scope;
+
+          while (motherScope.parentScope != null)
+            motherScope = motherScope.parentScope;
+
+          value.position = Position.GlobalStackBaseOffset(motherScope.maxRequiredStackSpace.Value);
+
+          motherScope.maxRequiredStackSpace.Value += value.type.GetSize();
+        }
+        else
+        {
+          value.position = Position.StackOffset(stackSize.Value);
+          stackSize.Value += value.type.GetSize();
+        }
+
         value.hasPosition = true;
         value.hasHomePosition = true;
         value.homePosition = value.position;
@@ -929,52 +951,6 @@ namespace llsc
       }
 
       value.remainingReferences--;
-    }
-  }
-
-  public class CInstruction_GetPointerOfArrayStart : CInstruction
-  {
-    CNamedValue value;
-    CValue outValue;
-    SharedValue<long> stackSize;
-
-    public CInstruction_GetPointerOfArrayStart(CNamedValue value, out CValue outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
-    {
-      if (!(value.type is ArrayCType))
-        throw new Exception("Internal Compiler Error: Unexpected Type.");
-
-      this.value = value;
-      this.outValue = outValue = new CValue(file, line, new PtrCType((value.type as ArrayCType).type), true) { description = $"reference to '{value}'[0]" };
-      this.stackSize = stackSize;
-    }
-
-    public override void GetLLInstructions(ref ByteCodeState byteCodeState)
-    {
-      value.isVolatile = true;
-      value.isInitialized = true; // Do we want this?
-
-      if (!value.hasPosition)
-      {
-        value.position = Position.StackOffset(stackSize.Value);
-        stackSize.Value += value.type.GetSize();
-        value.hasPosition = true;
-        value.hasHomePosition = true;
-        value.homePosition = value.position;
-        value.modifiedSinceLastHome = false;
-      }
-      else if (value.hasPosition && value.position.type == PositionType.InRegister)
-      {
-        byteCodeState.MoveValueToHome(value, stackSize);
-      }
-
-      int register = byteCodeState.GetFreeIntegerRegister(stackSize);
-
-      outValue.hasPosition = true;
-      outValue.position = Position.Register(register);
-      byteCodeState.registers[register] = outValue;
-
-      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
-      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
     }
   }
 

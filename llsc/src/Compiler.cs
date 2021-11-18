@@ -2504,7 +2504,7 @@ namespace llsc
           {
             CGlobalValueReference addressOf;
 
-            scope.instructions.Add(new CInstruction_AddressOfVariable(variable, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
+            scope.instructions.Add(new CInstruction_AddressOfVariable(variable, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line, scope));
 
             return addressOf;
           }
@@ -2543,8 +2543,12 @@ namespace llsc
 
               if (type.type is VoidCType)
                 Error($"Invalid array of type {type.type} ({variable}).", nameNode.file, nameNode.line);
-              
-              scope.instructions.Add(new CInstruction_GetPointerOfArrayStart(variable, out ptrWithoutOffset, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
+
+              CGlobalValueReference reference;
+
+              scope.instructions.Add(new CInstruction_ArrayVariableToPtr(variable, out reference, scope.maxRequiredStackSpace, nameNode.file, nameNode.line));
+
+              ptrWithoutOffset = reference;
             }
             else if (variable.type is PtrCType)
             {

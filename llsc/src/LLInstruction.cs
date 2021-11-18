@@ -182,7 +182,7 @@ namespace llsc
           return ret + $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}";
 
         default:
-          return ret + position.ToString();
+          return ret + locationInfo.position.ToString();
       }
     }
   }
@@ -205,7 +205,7 @@ namespace llsc
 
     public override string ToString()
     {
-      string ret = $"# Data Segment: '{description}'\n\n";
+      string ret = $"# Data Segment: '{description}'\n";
 
       long i = 0;
 
@@ -630,13 +630,33 @@ namespace llsc
 
       if (this.value.Length != 8)
         throw new Exception("Internal Compiler Error!");
+
+      if (Compiler.OptimizationLevel != 0)
+      {
+        bool isZero = true;
+
+        foreach (var x in value)
+        {
+          if (x != 0)
+          {
+            isZero = false;
+            break;
+          }
+        }
+
+        if (isZero)
+          bytecodeSize = 0;
+      }
     }
 
     public override void AppendBytecode(ref List<byte> byteCode)
     {
-      byteCode.Add((byte)ByteCodeInstructions.LLS_OP_ADD_IMM);
-      byteCode.Add((byte)register);
-      byteCode.AddRange(value);
+      if (bytecodeSize != 0)
+      {
+        byteCode.Add((byte)ByteCodeInstructions.LLS_OP_ADD_IMM);
+        byteCode.Add((byte)register);
+        byteCode.AddRange(value);
+      }
     }
 
     public override string ToString() => $"{ByteCodeInstructions.LLS_OP_ADD_IMM} r:{register}, {value.ElementsToString("X2")}";
