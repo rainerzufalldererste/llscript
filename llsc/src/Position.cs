@@ -12,11 +12,88 @@ namespace llsc
 
   public struct Position
   {
+    private int _registerIndex;
+    private long _stackOffsetForward;
+    private long _globalStackBaseOffset;
+    private LLI_Data_PseudoInstruction _codeBaseOffset;
+
     public PositionType type;
-    public int registerIndex;
-    public long stackOffsetForward;
-    public long globalStackBaseOffset;
-    public LLI_Data_PseudoInstruction codeBaseOffset;
+    public int registerIndex
+    {
+      get
+      {
+        if (type != PositionType.InRegister)
+          throw new Exception("Invalid Position Type");
+
+        return _registerIndex;
+      }
+
+      set 
+      {
+        if (type != PositionType.InRegister)
+          throw new Exception("Invalid Position Type");
+
+        _registerIndex = value;
+      } 
+    }
+
+    public long stackOffsetForward
+    {
+      get
+      {
+        if (type != PositionType.OnStack)
+          throw new Exception("Invalid Position Type");
+
+        return _stackOffsetForward;
+      }
+
+      set
+      {
+        if (type != PositionType.OnStack)
+          throw new Exception("Invalid Position Type");
+
+        _stackOffsetForward = value;
+      }
+    }
+
+    public long globalStackBaseOffset
+    {
+      get
+      {
+        if (type != PositionType.GlobalStackOffset)
+          throw new Exception("Invalid Position Type");
+
+        return _globalStackBaseOffset;
+      }
+
+      set
+      {
+        if (type != PositionType.GlobalStackOffset)
+          throw new Exception("Invalid Position Type");
+
+        _globalStackBaseOffset = value;
+      }
+    }
+
+    public LLI_Data_PseudoInstruction codeBaseOffset
+    {
+      get
+      {
+        if (type != PositionType.CodeBaseOffset)
+          throw new Exception("Invalid Position Type");
+
+        return _codeBaseOffset;
+      }
+
+      set
+      {
+        if (type != PositionType.CodeBaseOffset)
+          throw new Exception("Invalid Position Type");
+
+        _codeBaseOffset = value;
+      }
+    }
+
 
     public static Position Register(int registerIndex)
     {

@@ -832,7 +832,26 @@ namespace llsc
       outValue.position = Position.Register(register);
       byteCodeState.registers[register] = outValue;
 
-      byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
+      switch (value.position.type)
+      {
+        case PositionType.OnStack:
+          byteCodeState.instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, value.position.stackOffsetForward, register));
+          break;
+
+        case PositionType.GlobalStackOffset:
+          byteCodeState.instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, (byte)register));
+          byteCodeState.instructions.Add(new LLI_AddImm(register, BitConverter.GetBytes(value.position.globalStackBaseOffset)));
+          break;
+
+        case PositionType.CodeBaseOffset:
+          byteCodeState.instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, (byte)register));
+          byteCodeState.instructions.Add(new LLI_AddImmInstructionOffset(register, value.position.codeBaseOffset));
+          break;
+
+        default:
+          throw new NotImplementedException();
+      }
+
       byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(outValue, stackSize, byteCodeState));
     }
   }
