@@ -25,6 +25,8 @@ namespace llsc
     public static readonly int IntegerRegisters = 8;
     public static readonly int FloatRegisters = 8;
 
+    public static Scope GlobalScope = new Scope();
+
     public static class Assumptions
     {
       public static bool ByteCodeMutable = false;
@@ -71,7 +73,6 @@ namespace llsc
 
       string outFileName = "bytecode.lls";
       IEnumerable<FileContents> files = null;
-      var globalScope = new Scope();
       var byteCodeState = new ByteCodeState();
 
       try
@@ -152,7 +153,7 @@ namespace llsc
         if (!EmitAsm && !EmitDbgDatabse)
           files = null;
 
-        CompileScope(globalScope, allNodes, ref byteCodeState);
+        CompileScope(GlobalScope, allNodes, ref byteCodeState);
         Console.WriteLine($"Instruction Generation Succeeded. ({byteCodeState.instructions.Count} Instructions & Pseudo-Instructions generated.)");
 
         byteCodeState.CompileInstructionsToBytecode();
@@ -1223,7 +1224,7 @@ namespace llsc
             var value = GetLValue(scope, lnodes, ref byteCodeState);
 
             if (value != null && value.type != null && value.type is ArrayCType)
-              scope.instructions.Add(new CInstruction_InitializeArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace, scope));
+              scope.instructions.Add(new CInstruction_InitializeArray(value, new byte[value.type.GetSize()], lnodes[0].file, lnodes[0].line, scope.maxRequiredStackSpace));
           }
           // `++`, `--`.
           else if (nextEndLine == firstOperator + 1)
@@ -1480,10 +1481,10 @@ namespace llsc
       }
 
       var value = new CNamedValue(nameNode, arrayType, true);
-      value.isStatic = isStatic;
+      value.isStatic = isStatic || isConst;
 
       scope.AddVariable(value);
-      scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace, scope));
+      scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
     }
 
     private static void ParseDynamicArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
@@ -1498,10 +1499,10 @@ namespace llsc
       {
         var stringValue = nodes[6] as NStringValue;
         var arrayType = new ArrayCType(builtinType, stringValue.length) { isConst = isConst };
-        var value = new CNamedValue(nodes[4] as NName, arrayType, true) { isStatic = isStatic };
+        var value = new CNamedValue(nodes[4] as NName, arrayType, true) { isStatic = isStatic || isConst };
 
         scope.AddVariable(value);
-        scope.instructions.Add(new CInstruction_InitializeArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace, scope));
+        scope.instructions.Add(new CInstruction_InitializeArray(value, stringValue.bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
         nodes.RemoveRange(0, 8);
       }
       else if (nodes.Count > 6 && nodes[6] is NOpenScope)
@@ -1564,10 +1565,10 @@ namespace llsc
         }
 
         var value = new CNamedValue(nameNode, arrayType, true);
-        value.isStatic = isStatic;
+        value.isStatic = isStatic || isConst;
 
         scope.AddVariable(value);
-        scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace, scope));
+        scope.instructions.Add(new CInstruction_InitializeArray(value, data.ToArray(), startNode.file, startNode.line, scope.maxRequiredStackSpace));
       }
       else
       {
@@ -1583,7 +1584,29 @@ namespace llsc
         var type = nodes[0] as NType;
         var name = nodes[1] as NName;
 
-        var value = new CNamedValue(name, type.type, false);
+        var ctype = type.type.MakeCastableClone(type.type);
+        ctype.explicitCast = null;
+
+        var value = new CNamedValue(name, ctype, false) { isStatic = scope.parentScope == null };
+
+        scope.AddVariable(value);
+
+        return value;
+      }
+      if (nodes.Count == 3 && nodes.NextIs(typeof(NConstKeyword), typeof(NType), typeof(NName)))
+      {
+        if (rValueType == null)
+          Error($"Cannot declare const value {nodes[2]}. {nodes[0]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
+
+        var type = nodes[1] as NType;
+        var name = nodes[2] as NName;
+
+        var ctype = type.type.MakeCastableClone(type.type);
+        ctype.explicitCast = null;
+        ctype.isConst = true;
+
+        var value = new CNamedValue(name, ctype, false) { isStatic = true };
+
         scope.AddVariable(value);
 
         return value;
@@ -1593,12 +1616,30 @@ namespace llsc
         if (rValueType == null)
           Error($"Cannot deduct type for {nodes[1]}. {nodes[0]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
 
-        if (rValueType.explicitCast != null)
-          rValueType = rValueType.explicitCast;
+        var type = (rValueType.explicitCast == null ? rValueType : rValueType.explicitCast);
+        type.MakeCastableClone(type);
+        type.explicitCast = null;
 
         var name = nodes[1] as NName;
+        var value = new CNamedValue(name, type, false) { isStatic = scope.parentScope == null };
 
-        var value = new CNamedValue(name, rValueType, false);
+        scope.AddVariable(value);
+
+        return value;
+      }
+      else if (nodes.Count == 3 && nodes.NextIs(typeof(NConstKeyword), typeof(NVarKeyword), typeof(NName)))
+      {
+        if (rValueType == null)
+          Error($"Cannot declare const value {nodes[2]}. {nodes[0]} and {nodes[1]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
+
+        var type = (rValueType.explicitCast == null ? rValueType : rValueType.explicitCast);
+        type.MakeCastableClone(type);
+        type.explicitCast = null;
+        type.isConst = true;
+
+        var name = nodes[2] as NName;
+        var value = new CNamedValue(name, type, false) { isStatic = true };
+
         scope.AddVariable(value);
 
         return value;
@@ -2473,7 +2514,7 @@ namespace llsc
         CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength) { isConst = true }, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
         inlineString.type.isConst = true;
 
-        scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace, scope));
+        scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
 
         return inlineString;
       }
@@ -2504,7 +2545,7 @@ namespace llsc
           {
             CGlobalValueReference addressOf;
 
-            scope.instructions.Add(new CInstruction_AddressOfVariable(variable, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line, scope));
+            scope.instructions.Add(new CInstruction_AddressOfVariable(variable, out addressOf, scope.maxRequiredStackSpace, nodes[0].file, nodes[0].line));
 
             return addressOf;
           }

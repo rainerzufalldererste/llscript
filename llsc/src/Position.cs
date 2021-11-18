@@ -18,6 +18,7 @@ namespace llsc
     private LLI_Data_PseudoInstruction _codeBaseOffset;
 
     public PositionType type;
+
     public int registerIndex
     {
       get

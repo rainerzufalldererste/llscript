@@ -163,14 +163,12 @@ namespace llsc
     private readonly CValue value;
     private readonly byte[] data;
     private readonly SharedValue<long> stackSize;
-    private readonly Scope scope;
 
-    public CInstruction_InitializeArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize, Scope parentScope) : base(file, line)
+    public CInstruction_InitializeArray(CValue value, byte[] data, string file, int line, SharedValue<long> stackSize) : base(file, line)
     {
       this.data = data;
       this.value = value;
       this.stackSize = stackSize;
-      this.scope = parentScope;
 
       if (value.hasPosition && value.position.type == PositionType.InRegister)
         throw new Exception("Internal Compiler Error.");
@@ -190,14 +188,9 @@ namespace llsc
         }
         else if (value is CNamedValue && (value as CNamedValue).isStatic)
         {
-          Scope motherScope = scope;
+          value.position = Position.GlobalStackBaseOffset(Compiler.GlobalScope.maxRequiredStackSpace.Value);
 
-          while (motherScope.parentScope != null)
-            motherScope = motherScope.parentScope;
-
-          value.position = Position.GlobalStackBaseOffset(motherScope.maxRequiredStackSpace.Value);
-
-          motherScope.maxRequiredStackSpace.Value += value.type.GetSize();
+          Compiler.GlobalScope.maxRequiredStackSpace.Value += value.type.GetSize();
         }
         else
         {
@@ -304,6 +297,9 @@ namespace llsc
       this.targetValue = targetValue;
       this.sourceValue = sourceValue;
       this.stackSize = stackSize;
+
+      if (targetValue.type.isConst)
+        Compiler.Error($"Cannot assign const value '{targetValue}' to {sourceValue}.", file, line);
 
       if (!sourceValue.type.CanImplicitCastTo(targetValue.type))
       {
@@ -719,6 +715,11 @@ namespace llsc
           byteCodeState.instructions.Add(new LLI_StackIncrementImm(8));
           pushedBytes += 8;
         }
+        else if (functionPtr.position.type == PositionType.GlobalStackOffset || functionPtr.position.type == PositionType.CodeBaseOffset)
+        {
+          byteCodeState.CopyPositionToRegisterInplace(chosenIntRegister, functionPtr.type.GetSize(), functionPtr.position, stackSize);
+          byteCodeState.instructions.Add(new LLI_PushRegister((byte)chosenIntRegister));
+        }
         else
         {
           throw new NotImplementedException();
@@ -797,16 +798,14 @@ namespace llsc
     protected CNamedValue value;
     protected CGlobalValueReference outValue;
     protected SharedValue<long> stackSize;
-    protected Scope scope;
 
     protected CInstruction_AddressOfVariable(string file, int line) : base(file, line) { }
 
-    public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line, Scope scope) : base(file, line)
+    public CInstruction_AddressOfVariable(CNamedValue value, out CGlobalValueReference outValue, SharedValue<long> stackSize, string file, int line) : base(file, line)
     {
       this.value = value;
       this.outValue = outValue = new CGlobalValueReference(new PtrCType(value.type), file, line) { description = $"reference to '{value}'" };
       this.stackSize = stackSize;
-      this.scope = scope;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -823,14 +822,9 @@ namespace llsc
         }
         else if (value.isStatic)
         {
-          Scope motherScope = scope;
+          value.position = Position.GlobalStackBaseOffset(Compiler.GlobalScope.maxRequiredStackSpace.Value);
 
-          while (motherScope.parentScope != null)
-            motherScope = motherScope.parentScope;
-
-          value.position = Position.GlobalStackBaseOffset(motherScope.maxRequiredStackSpace.Value);
-
-          motherScope.maxRequiredStackSpace.Value += value.type.GetSize();
+          Compiler.GlobalScope.maxRequiredStackSpace.Value += value.type.GetSize();
         }
         else
         {
