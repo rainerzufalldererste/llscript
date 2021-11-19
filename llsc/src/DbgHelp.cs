@@ -49,6 +49,8 @@ namespace llsc
     public string name;
     public DbgType type;
     public bool isVariable;
+    public bool isConst;
+    public bool isStatic;
     public Position position;
     public SharedValue<long> stackSize;
 
@@ -92,6 +94,8 @@ namespace llsc
       }
 
       position = value.position;
+      isConst = value.type.isConst || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst);
+      isStatic = value is CNamedValue && (value as CNamedValue).isStatic;
       this.stackSize = stackSize;
     }
 
@@ -102,6 +106,8 @@ namespace llsc
       bytes.Add((byte)type);
       bytes.Add((byte)position.type);
       bytes.Add(isVariable ? (byte)1 : (byte)0);
+      bytes.Add(isConst ? (byte)1 : (byte)0);
+      bytes.Add(isStatic ? (byte)1 : (byte)0);
 
       switch (position.type)
       {
@@ -320,7 +326,7 @@ namespace llsc
         List<byte> header = new List<byte>();
         List<byte> body = new List<byte>();
 
-        header.AddRange(BitConverter.GetBytes((ulong)1)); // Debug Info Version.
+        header.AddRange(BitConverter.GetBytes((ulong)3)); // Debug Info Version.
 
         ulong count = 0;
 

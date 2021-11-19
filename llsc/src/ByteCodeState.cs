@@ -69,8 +69,11 @@ namespace llsc
       }
     }
 
-    private void DumpValue(CValue value)
+    public void DumpValue(CValue value)
     {
+      if (value.hasPosition && value.position.type == PositionType.InRegister)
+        registers[value.position.registerIndex] = null;
+
       value.hasPosition = false;
 
       if (Compiler.DetailedIntermediateOutput)
@@ -295,139 +298,152 @@ namespace llsc
       {
         var value = registers[registerIndex] as CNamedValue;
 
-        if (value.hasHomePosition && !value.modifiedSinceLastHome)
-        {
-          value.position = value.homePosition;
-          instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
-          registers[registerIndex] = null;
-        }
-        else
-        {
-          if (!value.hasHomePosition && Compiler.DetailedIntermediateOutput)
-            instructions.Add(new LLI_Comment_PseudoInstruction($"Assigning a home location for '{value}'."));
+        if (value.position.type != PositionType.InRegister || value.position.registerIndex != registerIndex)
+          throw new Exception("Internal Compiler Error");
 
-          if (!value.hasHomePosition && value.hasPosition && value.position.type == PositionType.OnStack)
-            throw new Exception("How is this value on the stack?!");
-
-          bool storeInCodeBase = value.type.isConst || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst) || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable);
-          bool storeOnGlobalStack = !storeInCodeBase && value.isStatic;
-
-          if (storeInCodeBase || storeOnGlobalStack)
-          {
-            if (!value.hasHomePosition)
-            {
-              if (storeInCodeBase)
-              {
-                value.homePosition = Position.CodeBaseOffset(value, new byte[value.type.GetSize()], value.file, value.line);
-                postInstructionDataStorage.Add(value.homePosition.codeBaseOffset);
-                value.hasHomePosition = true;
-              }
-              else // if (storeOnGlobalStack)
-              {
-                value.homePosition = Position.GlobalStackBaseOffset(Compiler.GlobalScope.maxRequiredStackSpace.Value);
-                Compiler.GlobalScope.maxRequiredStackSpace.Value += value.type.GetSize();
-                value.hasHomePosition = true;
-              }
-            }
-
-            int freeIntRegisters = 0;
-            int firstFreeRegister = 0;
-
-            for (int i = 0; i < Compiler.IntegerRegisters; i++)
-            {
-              if (!registerLocked[i] && registers[i] == null)
-              {
-                freeIntRegisters++;
-                firstFreeRegister = i;
-                break;
-              }
-            }
-
-            if (freeIntRegisters == 0)
-            {
-              for (int i = 0; i < Compiler.IntegerRegisters; i++)
-              {
-                if (!registerLocked[i] && registers[i] != null && registers[i] is CConstIntValue)
-                {
-                  freeIntRegisters++;
-                  firstFreeRegister = i;
-
-                  registers[i] = null;
-
-                  break;
-                }
-              }
-            }
-
-            if (freeIntRegisters > 0)
-            {
-              if (storeInCodeBase)
-              {
-                instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, (byte)firstFreeRegister));
-                instructions.Add(new LLI_AddImmInstructionOffset(firstFreeRegister, value.homePosition.codeBaseOffset));
-              }
-              else // if (storeOnGlobalStack)
-              {
-                instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, (byte)firstFreeRegister));
-                instructions.Add(new LLI_AddImm(firstFreeRegister, BitConverter.GetBytes(value.homePosition.globalStackBaseOffset)));
-              }
-
-              if (value.type.GetSize() == 8)
-                instructions.Add(new LLI_MovRegisterToPtrInRegister(firstFreeRegister, registerIndex));
-              else
-                instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(firstFreeRegister, registerIndex, (int)value.type.GetSize()));
-            }
-            else
-            {
-              // No Registers Available, We'll free one up and then restore it's original value.
-              byte chosenRegister = (byte)((registerIndex + 1) % Compiler.IntegerRegisters);
-
-              instructions.Add(new LLI_PushRegister(chosenRegister));
-
-              if (storeInCodeBase)
-              {
-                instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, chosenRegister));
-                instructions.Add(new LLI_AddImmInstructionOffset(chosenRegister, value.homePosition.codeBaseOffset));
-              }
-              else // if (storeOnGlobalStack)
-              {
-                instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, chosenRegister));
-                instructions.Add(new LLI_AddImm(chosenRegister, BitConverter.GetBytes(value.homePosition.globalStackBaseOffset)));
-              }
-
-              if (value.type.GetSize() == 8)
-                instructions.Add(new LLI_MovRegisterToPtrInRegister(chosenRegister, registerIndex));
-              else
-                instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(chosenRegister, registerIndex, (int)value.type.GetSize()));
-
-              instructions.Add(new LLI_PopRegister(chosenRegister));
-            }
-          }
-          else
-          {
-            if (!value.hasHomePosition)
-            {
-              value.homePosition = Position.StackOffset(stackSize.Value);
-              var size = value.type.GetSize();
-              stackSize.Value += size;
-              value.hasHomePosition = true;
-            }
-
-            if (value.type.GetSize() == 8)
-              instructions.Add(new LLI_MovRegisterToStackOffset(registerIndex, stackSize, value.homePosition.stackOffsetForward));
-            else
-              instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(registerIndex, stackSize, value.homePosition.stackOffsetForward, (int)value.type.GetSize()));
-          }
-
-          value.modifiedSinceLastHome = false;
-          value.hasPosition = true;
-          value.position = value.homePosition;
-
-          instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
-        }
+        MoveRegisterValueToHome(value, stackSize);
       }
 
       registers[registerIndex] = null;
+    }
+
+    public void MoveRegisterValueToHome(CNamedValue value, SharedValue<long> stackSize)
+    {
+      if (value.position.type != PositionType.InRegister)
+        throw new Exception("Internal Compiler Error.");
+
+      int registerIndex = value.position.registerIndex;
+
+      if (value.hasHomePosition && !value.modifiedSinceLastHome)
+      {
+        value.position = value.homePosition;
+        instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+        registers[registerIndex] = null;
+      }
+      else
+      {
+        if (!value.hasHomePosition && Compiler.DetailedIntermediateOutput)
+          instructions.Add(new LLI_Comment_PseudoInstruction($"Assigning a home location for '{value}'."));
+
+        if (!value.hasHomePosition && value.hasPosition && value.position.type == PositionType.OnStack)
+          throw new Exception("How is this value on the stack?!");
+
+        bool storeInCodeBase = value.type.isConst || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst) || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable);
+        bool storeOnGlobalStack = !storeInCodeBase && value.isStatic;
+
+        if (storeInCodeBase || storeOnGlobalStack)
+        {
+          if (!value.hasHomePosition)
+          {
+            if (storeInCodeBase)
+            {
+              value.homePosition = Position.CodeBaseOffset(value, new byte[value.type.GetSize()], value.file, value.line);
+              postInstructionDataStorage.Add(value.homePosition.codeBaseOffset);
+              value.hasHomePosition = true;
+            }
+            else // if (storeOnGlobalStack)
+            {
+              value.homePosition = Position.GlobalStackBaseOffset(Compiler.GlobalScope.maxRequiredStackSpace.Value);
+              Compiler.GlobalScope.maxRequiredStackSpace.Value += value.type.GetSize();
+              value.hasHomePosition = true;
+            }
+          }
+
+          int freeIntRegisters = 0;
+          int firstFreeRegister = 0;
+
+          for (int i = 0; i < Compiler.IntegerRegisters; i++)
+          {
+            if (!registerLocked[i] && registers[i] == null)
+            {
+              freeIntRegisters++;
+              firstFreeRegister = i;
+              break;
+            }
+          }
+
+          if (freeIntRegisters == 0)
+          {
+            for (int i = 0; i < Compiler.IntegerRegisters; i++)
+            {
+              if (!registerLocked[i] && registers[i] != null && registers[i] is CConstIntValue)
+              {
+                freeIntRegisters++;
+                firstFreeRegister = i;
+
+                registers[i] = null;
+
+                break;
+              }
+            }
+          }
+
+          if (freeIntRegisters > 0)
+          {
+            if (storeInCodeBase)
+            {
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, (byte)firstFreeRegister));
+              instructions.Add(new LLI_AddImmInstructionOffset(firstFreeRegister, value.homePosition.codeBaseOffset));
+            }
+            else // if (storeOnGlobalStack)
+            {
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, (byte)firstFreeRegister));
+              instructions.Add(new LLI_AddImm(firstFreeRegister, BitConverter.GetBytes(value.homePosition.globalStackBaseOffset)));
+            }
+
+            if (value.type.GetSize() == 8)
+              instructions.Add(new LLI_MovRegisterToPtrInRegister(firstFreeRegister, registerIndex));
+            else
+              instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(firstFreeRegister, registerIndex, (int)value.type.GetSize()));
+          }
+          else
+          {
+            // No Registers Available, We'll free one up and then restore it's original value.
+            byte chosenRegister = (byte)((registerIndex + 1) % Compiler.IntegerRegisters);
+
+            instructions.Add(new LLI_PushRegister(chosenRegister));
+
+            if (storeInCodeBase)
+            {
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_CODE_BASE_PTR, chosenRegister));
+              instructions.Add(new LLI_AddImmInstructionOffset(chosenRegister, value.homePosition.codeBaseOffset));
+            }
+            else // if (storeOnGlobalStack)
+            {
+              instructions.Add(new LLI_MovRuntimeParamToRegister(LLI_RuntimeParam.LLS_RP_STACK_BASE_PTR, chosenRegister));
+              instructions.Add(new LLI_AddImm(chosenRegister, BitConverter.GetBytes(value.homePosition.globalStackBaseOffset)));
+            }
+
+            if (value.type.GetSize() == 8)
+              instructions.Add(new LLI_MovRegisterToPtrInRegister(chosenRegister, registerIndex));
+            else
+              instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(chosenRegister, registerIndex, (int)value.type.GetSize()));
+
+            instructions.Add(new LLI_PopRegister(chosenRegister));
+          }
+        }
+        else
+        {
+          if (!value.hasHomePosition)
+          {
+            value.homePosition = Position.StackOffset(stackSize.Value);
+            var size = value.type.GetSize();
+            stackSize.Value += size;
+            value.hasHomePosition = true;
+          }
+
+          if (value.type.GetSize() == 8)
+            instructions.Add(new LLI_MovRegisterToStackOffset(registerIndex, stackSize, value.homePosition.stackOffsetForward));
+          else
+            instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(registerIndex, stackSize, value.homePosition.stackOffsetForward, (int)value.type.GetSize()));
+        }
+
+        value.modifiedSinceLastHome = false;
+        value.hasPosition = true;
+        value.position = value.homePosition;
+
+        instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+      }
     }
 
     public void BackupRegisterValues(SharedValue<long> stackSize)
@@ -478,9 +494,6 @@ namespace llsc
 
     public void MoveValueToPosition(CValue sourceValue, Position targetPosition, SharedValue<long> stackSize, bool addReference)
     {
-      if (Compiler.DetailedIntermediateOutput)
-        instructions.Add(new LLI_Comment_PseudoInstruction($"Moving Value '{sourceValue}' to {targetPosition}."));
-
       // TODO: Work out the reference count...
 
       if (targetPosition.type != PositionType.OnStack && sourceValue.type.GetSize() > 8)
@@ -493,6 +506,7 @@ namespace llsc
 
       sourceValue.hasPosition = true;
       sourceValue.position = targetPosition;
+
       instructions.Add(new LLI_Location_PseudoInstruction(sourceValue, stackSize, this));
     }
 
@@ -700,26 +714,7 @@ namespace llsc
       if (value.position.type != PositionType.InRegister)
         return;
 
-      if (!value.hasHomePosition)
-      {
-        value.hasHomePosition = true;
-        value.homePosition = Position.StackOffset(stackSize.Value);
-        stackSize.Value += value.type.GetSize();
-        value.modifiedSinceLastHome = true;
-      }
-
-      if (!value.modifiedSinceLastHome)
-      {
-        value.position = value.homePosition;
-        instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
-        return;
-      }
-
-      Position position = value.homePosition;
-
-      MoveValueToPosition(value, position, stackSize, false);
-
-      value.modifiedSinceLastHome = false;
+      MoveRegisterValueToHome(value, stackSize);
     }
 
     public void CopyRegisterToPosition(int registerIndex, long size, Position position, SharedValue<long> stackSize)

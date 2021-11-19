@@ -979,16 +979,12 @@ namespace llsc
       source.remainingReferences--;
 
       if (source is CNamedValue)
-      {
         byteCodeState.MoveValueToHome(source as CNamedValue, stackSize);
-      }
-      else if (source.hasPosition && source.position.type == PositionType.InRegister && source.remainingReferences > 0)
-      {
-        var newPosition = Position.StackOffset(stackSize.Value);
-        stackSize.Value += source.type.GetSize();
+      else
+        byteCodeState.DumpValue(source);
 
-        byteCodeState.MoveValueToPosition(source, newPosition, stackSize, false);
-      }
+      if (target.position.type == PositionType.InRegister)
+        byteCodeState.registers[target.position.registerIndex] = target;
     }
 
     public override string ToString()

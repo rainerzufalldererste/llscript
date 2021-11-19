@@ -167,6 +167,8 @@ typedef struct
   uint8_t type;
   uint8_t positionType;
   bool isVariable;
+  bool isConst;
+  bool isStatic;
   uint64_t position;
   char name[];
 } DebugDatabaseVariableLocation;
@@ -330,7 +332,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
     {
       DebugDatabaseHeader *pHeader = pDebugDatabase;
 
-      if (pHeader->debugDatabaseVersion == 1)
+      if (pHeader->debugDatabaseVersion == 3)
       {
         int64_t l = 0;
         int64_t r = pHeader->entryCount - 1;
@@ -1838,7 +1840,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
       for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
-        recentValues[i].pLocation = NULL;
+        if (recentValues[i].pLocation != NULL && !recentValues[i].pLocation->isStatic)
+          recentValues[i].pLocation = NULL;
 #endif
 
       break;
@@ -2178,7 +2181,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (!stepByLine)
             PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
-          if (pVariableInfo->isVariable)
+          if (pVariableInfo->isVariable && !pVariableInfo->isConst)
           {
             size_t replaceByMatch = (size_t)-1;
             size_t replaceByAge = (size_t)-1;
