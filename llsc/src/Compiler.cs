@@ -1296,6 +1296,66 @@ namespace llsc
 
               scope.instructions.Add(new CInstruction_SetValuePtrToValue(ptrValue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
             }
+            else if (nodes[0] is NName && nodes[1] is NOpenBracket && nodes[firstOperator - 1] is NCloseBracket)
+            {
+              // is this a pair of brackets?
+              int bracketLevel = 0;
+
+              var lvaluenodes = nodes.GetRange(0, firstOperator); // last node should be the potential close bracket.
+
+              foreach (var node in lvaluenodes)
+                if (node is NOpenBracket)
+                  bracketLevel++;
+                else if (node is NCloseBracket)
+                  if (--bracketLevel == 0 && !object.ReferenceEquals(node, lvaluenodes[lvaluenodes.Count - 1]))
+                    Error($"Unexpected {node}.", node.file, node.line);
+
+              CValue variable = scope.GetVariable((nodes[0] as NName).name);
+
+              if (variable == null)
+                Error($"Unexpected token '{nodes[0]}'. Can't resolve identifer to variable.", nodes[0].file, nodes[0].line);
+
+              if (!(variable.type is ArrayCType) && !(variable.type is PtrCType))
+                Error($"Illegal subscript on variable {variable}. Expected pointer or array.", nodes[1].file, nodes[1].line);
+
+              if (variable.type is ArrayCType)
+              {
+                CGlobalValueReference reference;
+
+                scope.instructions.Add(new CInstruction_ArrayVariableToPtr(variable as CNamedValue, out reference, scope.maxRequiredStackSpace, nodes[1].file, nodes[1].line));
+
+                variable = reference;
+              }
+
+              var paramNodes = nodes.GetRange(2, firstOperator - 3);
+              var equalsNode = nodes[firstOperator];
+              var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
+              nodes.RemoveRange(0, nextEndLine + 1);
+
+              var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
+              rvalue.remainingReferences++;
+
+              if (!(rvalue is CNamedValue))
+                rvalue.description += " (rvalue)";
+
+              if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
+
+              var subScriptValue = GetRValue(scope, paramNodes, ref byteCodeState);
+
+              subScriptValue.remainingReferences++;
+
+              if (!(subScriptValue is CNamedValue))
+                subScriptValue.description += " (rvalue)";
+
+              if (!(subScriptValue.type is BuiltInCType && !(subScriptValue.type as BuiltInCType).IsFloat()))
+                Error($"Type '{subScriptValue}' cannot be used as subscript. Expected an integer type.", rnodes[0].file, rnodes[0].line);
+
+              CValue lvalue;
+              scope.instructions.Add(new CInstruction_Add(variable, subScriptValue, scope.maxRequiredStackSpace, false, out lvalue, nodes[1].file, nodes[1].line));
+
+              scope.instructions.Add(new CInstruction_SetValuePtrToValue(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
+            }
             else
             {
               var lnodes = nodes.GetRange(0, firstOperator);
@@ -2620,14 +2680,6 @@ namespace llsc
 
             if (!(index is CNamedValue))
               index.description += " (rvalue)";
-
-            if ((ptrWithoutOffset.type as PtrCType).pointsTo.GetSize() != 1)
-            {
-              index.remainingReferences++;
-              CValue newIndex = null;
-              scope.instructions.Add(new CInstruction_Multiply(index, new CConstIntValue((ulong)(ptrWithoutOffset.type as PtrCType).pointsTo.GetSize(), BuiltInCType.Types["u64"], null, -1), scope.maxRequiredStackSpace, false, out newIndex, nodes[0].file, nodes[0].line));
-              index = newIndex;
-            }
 
             CValue offsetPtr;
             index.remainingReferences++;
