@@ -1,11 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace llsc
 {
   public enum PositionType
   {
-    OnStack,
+    Invalid,
     InRegister,
+    OnStack,
     GlobalStackOffset,
     CodeBaseOffset,
   }
@@ -136,6 +138,35 @@ namespace llsc
       return ret;
     }
 
+    public static bool operator ==(Position a, Position b)
+    {
+      if (a.type != b.type)
+        return false;
+
+      switch (a.type)
+      {
+        default:
+          throw new Exception("Invalid Position Type.");
+
+        case PositionType.InRegister:
+          return a.registerIndex == b.registerIndex;
+
+        case PositionType.OnStack:
+          return a.stackOffsetForward == b.stackOffsetForward;
+
+        case PositionType.GlobalStackOffset:
+          return a.globalStackBaseOffset == b.globalStackBaseOffset;
+
+        case PositionType.CodeBaseOffset:
+          return a.codeBaseOffset == b.codeBaseOffset;
+      }
+    }
+
+    public static bool operator !=(Position a, Position b)
+    {
+      return !(a == b);
+    }
+
     public override string ToString()
     {
       switch (type)
@@ -152,6 +183,35 @@ namespace llsc
         case PositionType.CodeBaseOffset:
           return $"codeBaseOffset:({codeBaseOffset.description})" + (codeBaseOffset.position != 0 ? $" @{codeBaseOffset.position}" : "");
 
+        default:
+          throw new Exception("Invalid Position Type. Internal Compiler Error.");
+      }
+    }
+
+    public override bool Equals(object obj)
+    {
+      return obj is Position position && this == position;
+    }
+
+    public override int GetHashCode()
+    {
+      int hashCode = 91695821;
+      hashCode = hashCode * -1521134295 + type.GetHashCode();
+
+      switch (type)
+      {
+        case PositionType.InRegister:
+          return hashCode * -1521134295 + _registerIndex.GetHashCode();
+
+        case PositionType.OnStack:
+          return hashCode * -1521134295 + _stackOffsetForward.GetHashCode();
+
+        case PositionType.GlobalStackOffset:
+          return hashCode * -1521134295 + _globalStackBaseOffset.GetHashCode();
+
+        case PositionType.CodeBaseOffset:
+          return hashCode * -1521134295 + EqualityComparer<LLI_Data_PseudoInstruction>.Default.GetHashCode(_codeBaseOffset);
+          
         default:
           throw new Exception("Invalid Position Type. Internal Compiler Error.");
       }

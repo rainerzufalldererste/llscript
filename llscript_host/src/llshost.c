@@ -155,8 +155,9 @@ typedef enum
 
 enum
 {
-  PT_OnStack,
+  PT_Invalid,
   PT_InRegister,
+  PT_OnStack,
   PT_GlobalStackOffset,
   PT_CodeBaseOffset,
 } DebugDatabasePositionType;
@@ -332,7 +333,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
     {
       DebugDatabaseHeader *pHeader = pDebugDatabase;
 
-      if (pHeader->debugDatabaseVersion == 3)
+      if (pHeader->debugDatabaseVersion == 4)
       {
         int64_t l = 0;
         int64_t r = pHeader->entryCount - 1;
@@ -1959,7 +1960,6 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_INFO_START();
           LOG_X64(iregister[1]);
           LOG_INFO_END();
-          LOG_END();
 
           LPVOID(*HeapAlloc)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = pState->pHeapAlloc;
 
@@ -1969,6 +1969,14 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           {
             LOG_DETAILS();
             LOG_ERROR("Failed! (Return Value was 0)");
+            LOG_END();
+          }
+          else
+          {
+            LOG_DETAILS();
+            LOG_INFO_START();
+            LOG_X64(iregister[target_register]);
+            LOG_INFO_END();
             LOG_END();
           }
 
@@ -1997,7 +2005,6 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_DELIMITER();
           LOG_X64(iregister[2]);
           LOG_INFO_END();
-          LOG_END();
 
           LPVOID(*HeapReAlloc)(HANDLE hHeap, DWORD dwFlags, _Frees_ptr_opt_ LPVOID lpMem, SIZE_T dwBytes) = pState->pHeapRealloc;
 
@@ -2009,6 +2016,14 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             LOG_ERROR("Failed! (Return Value was 0)");
             LOG_END();
           }
+          else
+          {
+            LOG_DETAILS();
+            LOG_INFO_START();
+            LOG_X64(iregister[target_register]);
+            LOG_INFO_END();
+            LOG_END();
+          }
 
           break;
 
@@ -2018,7 +2033,6 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_INFO_START();
           LOG_X64(iregister[1]);
           LOG_INFO_END();
-          LOG_END();
 
           HMODULE(*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
 
@@ -2028,6 +2042,14 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           {
             LOG_DETAILS();
             LOG_ERROR("Failed! (Return Value was 0)");
+            LOG_END();
+          }
+          else
+          {
+            LOG_DETAILS();
+            LOG_INFO_START();
+            LOG_X64(iregister[target_register]);
+            LOG_INFO_END();
             LOG_END();
           }
 
@@ -2041,7 +2063,6 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_DELIMITER();
           LOG_X64(iregister[2]);
           LOG_INFO_END();
-          LOG_END();
 
           FARPROC(*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
 
@@ -2051,6 +2072,14 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           {
             LOG_DETAILS();
             LOG_ERROR("Failed! (Return Value was 0)");
+            LOG_END();
+          }
+          else
+          {
+            LOG_DETAILS();
+            LOG_INFO_START();
+            LOG_X64(iregister[target_register]);
+            LOG_INFO_END();
             LOG_END();
           }
 
@@ -2075,7 +2104,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t id = *pCodePtr;
       pCodePtr++;
 
-      LOG_REGISTER(id);
+      LOG_X64(id);
       LOG_DELIMITER();
 
       const lls_code_t target_register = *pCodePtr;
@@ -2178,10 +2207,11 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         {
           DebugDatabaseVariableLocation *pVariableInfo = (uint8_t *)pEntry + entryDataOffset + pEntry->offsets[pEntry->codeCount + pEntry->commentCount + i];
 
-          if (!stepByLine)
-            PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          bool storeValue = pVariableInfo->isVariable && !pVariableInfo->isConst;
 
-          if (pVariableInfo->isVariable && !pVariableInfo->isConst)
+          PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister, pState->pStack, pState->pCode);
+
+          if (storeValue)
           {
             size_t replaceByMatch = (size_t)-1;
             size_t replaceByAge = (size_t)-1;

@@ -162,7 +162,7 @@ namespace llsc
     public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize, ByteCodeState byteCodeState) : base(0)
     {
       if (!value.hasPosition)
-        throw new Exception("Internal Compiler Error!");
+        throw new Exception($"Internal Compiler Error! Location Pseudo Instruction is invalid, since the value {value} doesn't claim having a position.");
 
       locationInfo = new DbgLocationInfo(value, stackSize);
 

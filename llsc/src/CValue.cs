@@ -52,16 +52,17 @@ namespace llsc
       ret.lastTouchedInstructionCount = lastTouchedInstructionCount;
       ret.description = description;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace, file, line));
 
       return ret;
     }
 
-    public virtual CValue MakeCastableClone(CType targetType, Scope scope, ref ByteCodeState byteCodeState)
+    public virtual CValue MakeCastableClone(CType targetType, Scope scope, ref ByteCodeState byteCodeState, string file, int line)
     {
       var ret = this.DeepClone(scope, ref byteCodeState);
 
       ret.type = type.MakeCastableClone(targetType);
+      ret.description = $"(castable clone of {this})";
 
       return ret;
     }
@@ -207,7 +208,8 @@ namespace llsc
       ret.ivalue = ivalue;
       ret.smallestPossibleSignedType = smallestPossibleSignedType;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
+      if (ret.hasPosition)
+        scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace, file, line));
 
       return ret;
     }
@@ -248,7 +250,8 @@ namespace llsc
 
       ret.value = value;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
+      if (ret.hasPosition)
+        scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace, file, line));
 
       return ret;
     }
@@ -294,7 +297,19 @@ namespace llsc
       ret.hasHomePosition = false;
       ret.modifiedSinceLastHome = false;
 
-      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace));
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace, file, line));
+
+      return ret;
+    }
+
+    public override CValue MakeCastableClone(CType targetType, Scope scope, ref ByteCodeState byteCodeState, string file, int line)
+    {
+      var ret = new CValue(file, line, type.MakeCastableClone(targetType), isInitialized)
+      {
+        description = $"castable clone of '{this}'",
+      };
+
+      scope.instructions.Add(new CInstruction_CopyPositionFromValueToValue(this, ret, scope.maxRequiredStackSpace, file, line));
 
       return ret;
     }

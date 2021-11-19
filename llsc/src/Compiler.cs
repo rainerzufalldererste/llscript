@@ -1355,13 +1355,15 @@ namespace llsc
 
       if (scope.parentScope == null)
       {
+        int index = 0;
+
         foreach (var instruction in scope.instructions)
         {
           LLInstruction.currentFile = instruction.file;
           LLInstruction.currentLine = instruction.line;
 
           if (DetailedIntermediateOutput)
-            byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction}"));
+            byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction} (#{index++})"));
 
           try
           {
@@ -1370,6 +1372,8 @@ namespace llsc
           catch (Exception e)
           {
             Console.WriteLine($"Exception thrown on Instruction: {instruction}.");
+
+            byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"\nCompilation Failed with the following exception:\n\n{e}"));
 
             ExceptionDispatchInfo.Capture(e).Throw();
           }
@@ -1412,7 +1416,7 @@ namespace llsc
     private static void ParseFixedSizeArrayInitialization(Scope scope, ref List<Node> nodes, bool isConst)
     {
       if (!(((nodes[0] as NType).type as ArrayCType).type is BuiltInCType))
-        Error($"Invalid Type '{((nodes[0] as NType).type as ArrayCType).type.ToString()}'. Fixed Size Array Initializers can only contain builtin types.", nodes[0].file, nodes[0].line);
+        Error($"Invalid Type '{((nodes[0] as NType).type as ArrayCType).type}'. Fixed Size Array Initializers can only contain builtin types.", nodes[0].file, nodes[0].line);
 
       var nameNode = nodes[1] as NName;
       var startNode = nodes[0] as NType;
@@ -1868,7 +1872,7 @@ namespace llsc
                     if (_value.smallestPossibleSignedType == null)
                       Error($"Attempting to negate value '{value}' that cannot be represented by a signed value.", operatorNode.file, operatorNode.line);
 
-                    CValue resultingValue = _value.MakeCastableClone(_value.smallestPossibleSignedType, scope, ref byteCodeState);
+                    CValue resultingValue = _value.MakeCastableClone(_value.smallestPossibleSignedType, scope, ref byteCodeState, operatorNode.file, operatorNode.line);
                     resultingValue.description += $" (negated '{value}')";
 
                     (resultingValue as CConstIntValue).ivalue = -(resultingValue as CConstIntValue).ivalue;
@@ -2331,18 +2335,22 @@ namespace llsc
           rValueToCast = addressOf;
         }
 
-        if (!(rValueToCast is CNamedValue))
-          rValueToCast.description += " (rvalue to cast to '" + targetType + "')";
-
         if (rValueToCast.type.Equals(targetType))
+        {
           return rValueToCast;
+        }
         else if (!rValueToCast.type.CanExplicitCastTo(targetType) && !rValueToCast.type.CanImplicitCastTo(targetType))
+        {
           Error($"Explicit cast from type '{rValueToCast.type}' to type '{targetType}' is not possible for value '{rValueToCast}' (Defined in File '{rValueToCast.file ?? "?"}', Line {rValueToCast.line + 1}).", nodes[0].file, nodes[0].line);
+        }
         else
         {
           rValueToCast.remainingReferences++;
 
-          return rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState);
+          var ret = rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState, nodes[2].file, nodes[2].line);
+          ret.description += " (rvalue to cast to '" + targetType + "')";
+          
+          return ret;
         }
 
         return null; // Unreachable.

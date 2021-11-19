@@ -75,6 +75,7 @@ namespace llsc
         registers[value.position.registerIndex] = null;
 
       value.hasPosition = false;
+      value.position.type = PositionType.Invalid;
 
       if (Compiler.DetailedIntermediateOutput)
         instructions.Add(new LLI_Comment_PseudoInstruction("Dumping Value: " + value));
@@ -298,8 +299,11 @@ namespace llsc
       {
         var value = registers[registerIndex] as CNamedValue;
 
+        if (!value.hasPosition)
+          throw new Exception($"Internal Compiler Error when trying to remove {value} from r:{registerIndex}, which is claiming to not live anywhere.");
+
         if (value.position.type != PositionType.InRegister || value.position.registerIndex != registerIndex)
-          throw new Exception("Internal Compiler Error");
+          throw new Exception($"Internal Compiler Error when trying to remove {value} from r:{registerIndex}, which is claiming to live in {value.position}.");
 
         MoveRegisterValueToHome(value, stackSize);
       }
@@ -309,8 +313,14 @@ namespace llsc
 
     public void MoveRegisterValueToHome(CNamedValue value, SharedValue<long> stackSize)
     {
+      if (!value.hasPosition)
+        throw new Exception($"Internal Compiler Error. Trying to move {value}, eventhough it doesn't claim to have a position.");
+
       if (value.position.type != PositionType.InRegister)
-        throw new Exception("Internal Compiler Error.");
+        throw new Exception($"Internal Compiler Error. Expected value {value} to live in a register.");
+
+      if (registers[value.position.registerIndex] != value)
+        throw new Exception($"Internal Compiler Error. Value {value} claimed to be in register {value.position} it didn't actually inhabit.");
 
       int registerIndex = value.position.registerIndex;
 
@@ -371,7 +381,7 @@ namespace llsc
                 freeIntRegisters++;
                 firstFreeRegister = i;
 
-                registers[i] = null;
+                DumpValue(registers[i]);
 
                 break;
               }
@@ -438,8 +448,11 @@ namespace llsc
             instructions.Add(new LLI_MovRegisterToStackOffset_NBytes(registerIndex, stackSize, value.homePosition.stackOffsetForward, (int)value.type.GetSize()));
         }
 
+        registers[registerIndex] = null;
+
         value.modifiedSinceLastHome = false;
         value.hasPosition = true;
+        value.hasHomePosition = true;
         value.position = value.homePosition;
 
         instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
@@ -523,6 +536,9 @@ namespace llsc
         return;
       }
 
+      if (Compiler.DetailedIntermediateOutput)
+        instructions.Add(new LLI_Comment_PseudoInstruction($"Copying Value '{sourceValue}' to {targetPosition} with cast to {targetType}."));
+
       if (sourceValue.type is ArrayCType && targetType is PtrCType)
       {
         if (targetPosition.type == PositionType.InRegister)
@@ -553,29 +569,19 @@ namespace llsc
           }
 
           sourceValue.lastTouchedInstructionCount = instructions.Count;
-          registers[targetPosition.registerIndex] = sourceValue;
-        }
-        else if (targetPosition.type == PositionType.OnStack)
-        {
-          int triviallyFreeRegister = GetTriviallyFreeIntegerRegister();
 
-          if (triviallyFreeRegister == -1)
+          registers[targetPosition.registerIndex] = new CValue(sourceValue.file, sourceValue.line, new PtrCType((sourceValue.type as ArrayCType).type) { isConst = sourceValue.type.isConst }, sourceValue.isInitialized)
           {
-            instructions.Add(new LLI_PushRegister(0));
-            instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward + 8, 0));
-            instructions.Add(new LLI_PopRegister(0));
-          }
-          else
-          {
-            instructions.Add(new LLI_LoadEffectiveAddress_StackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, triviallyFreeRegister));
-            instructions.Add(new LLI_MovRegisterToStackOffset(triviallyFreeRegister, stackSize, sourceValue.position.stackOffsetForward));
+            description = $"ptr to array '{sourceValue}'",
+            hasPosition = true,
+            position = Position.Register(targetPosition.registerIndex)
+          };
 
-            registers[triviallyFreeRegister] = sourceValue;
-          }
+          instructions.Add(new LLI_Location_PseudoInstruction(registers[targetPosition.registerIndex], stackSize, this));
         }
         else
         {
-          throw new NotImplementedException();
+          CopyValueToPosition(sourceValue, targetPosition, stackSize);
         }
       }
       else if (sourceValue.type is FuncCType)
@@ -706,10 +712,10 @@ namespace llsc
     internal void MoveValueToHome(CNamedValue value, SharedValue<long> stackSize)
     {
       if (!value.hasPosition)
-        throw new Exception("Internal Compiler Error");
+        throw new Exception($"Internal Compiler Error. Value {value} doesn't have a position.");
 
       if (value.hasHomePosition && value.position.type == PositionType.OnStack && value.position.stackOffsetForward != value.homePosition.stackOffsetForward)
-        throw new Exception("Internal Compiler Error");
+        throw new Exception($"Internal Compiler Error. Value {value} somehow made it to an invalid stack position.");
 
       if (value.position.type != PositionType.InRegister)
         return;
@@ -950,11 +956,9 @@ namespace llsc
         else
         {
           // Store inplace.
-          if (position.type == PositionType.InRegister && sourceValue.type is BuiltInCType && !(sourceValue.type as BuiltInCType).IsFloat())
+          if (position.type == PositionType.InRegister && !(sourceValue.type is BuiltInCType && (sourceValue.type as BuiltInCType).IsFloat()))
           {
-            byte registerIndex = (byte)GetFreeIntegerRegister(stackSize);
-
-            CopyPositionToRegisterInplace(registerIndex, size, position, stackSize);
+            CopyPositionToRegisterInplace(position.registerIndex, size, sourceValue.position, stackSize);
           }
           else
           {

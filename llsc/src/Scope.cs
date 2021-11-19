@@ -100,8 +100,18 @@ namespace llsc
       if (definedVariables != null && definedVariables.ContainsKey(name))
         return definedVariables[name];
 
-      if (parentScope != null)
-        return parentScope.GetVariable(name);
+      var parent = parentScope;
+      bool functionLeft = false;
+
+      while (parent != null)
+      {
+        functionLeft |= (parent.isFunction != isFunction);
+
+        if (parent.definedVariables != null && parent.definedVariables.ContainsKey(name) && (!functionLeft || parent.definedVariables[name].isStatic))
+          return parent.definedVariables[name];
+
+        parent = parent.parentScope;
+      }
 
       return null;
     }

@@ -326,7 +326,7 @@ namespace llsc
         List<byte> header = new List<byte>();
         List<byte> body = new List<byte>();
 
-        header.AddRange(BitConverter.GetBytes((ulong)3)); // Debug Info Version.
+        header.AddRange(BitConverter.GetBytes((ulong)4)); // Debug Info Version.
 
         ulong count = 0;
 
