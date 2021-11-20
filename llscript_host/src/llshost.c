@@ -12,6 +12,9 @@
 #pragma warning (push, 0)
 #include <winternl.h>
 
+#define LLS_IREGISTER_COUNT (8)
+#define LLS_FREGISTER_COUNT (8)
+
 #ifdef LLS_LOW_PERF_MODE
 #define ASSERT_NO_ELSE else { __debugbreak(); return; }
 #define IF_LAST_OPT(...) if (__VA_ARGS__)
@@ -67,6 +70,14 @@ __forceinline void LOG_U64_AS_BYTES(uint64_t value)
     printf("%02" PRIX8 " ", pData[i]);
 }
 
+bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBase, const uint8_t *pCodeBase)
+{
+  if (((size_t)pPtr >= 0x00007FF000000000 && (size_t)pPtr < 0x00007FFFFFFFFFFF) || (pPtr > pStackBase && pPtr < pStackBase + 1024 * 1024) || (pPtr > pCodeBase && pPtr < pCodeBase + 1024 * 1024))
+    return IsBadReadPtr(pPtr, size);
+
+  return true;
+}
+
 __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
 {
   bool possiblePointer = false;
@@ -81,7 +92,7 @@ __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pS
     puts("\t\t// \tCould be heap pointer.");
   }
 
-  if (possiblePointer)
+  if (possiblePointer && !_IsBadReadPtr(possiblePointer, 8, pState->pStack, pState->pCode))
   {
     const uint64_t value = *(const uint64_t *)param;
     fputs("\t\t// \t", stdout);
@@ -242,19 +253,19 @@ void ResetConsoleColour()
     SetConsoleTextAttribute(stdOutHandle, GetWindowsConsoleColourFromConsoleColour(CC_BrightGray) | (GetWindowsConsoleColourFromConsoleColour(CC_Black) << 8));
 }
 
-bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBase, const uint8_t *pCodeBase)
-{
-  if (((size_t)pPtr >= 0x00007FF000000000 && (size_t)pPtr < 0x00007FFFFFFFFFFF) || (pPtr > pStackBase && pPtr < pStackBase + 1024 * 1024) || (pPtr > pCodeBase && pPtr < pCodeBase + 1024 * 1024))
-    return IsBadReadPtr(pPtr, size);
-
-  return true;
-}
-
 void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
 
+llshost_state_t *g_pState = NULL;
+uint8_t *pStack = NULL;
+lls_code_t *pCodePtr = NULL;
 bool stepInstructions = true;
+RecentVariableReference recentValues[10];
 
-extern BOOL WINAPI EventHandlerFunc(DWORD signal)
+uint64_t iregister[LLS_IREGISTER_COUNT];
+double fregister[LLS_FREGISTER_COUNT];
+bool cmp = false;
+
+BOOL WINAPI EventHandlerFunc(DWORD signal)
 {
   if (signal == CTRL_C_EVENT)
   {
@@ -285,6 +296,47 @@ extern BOOL WINAPI EventHandlerFunc(DWORD signal)
   return TRUE;
 }
 
+LONG WINAPI TopLevelExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
+{
+  fflush(stdout);
+  SetConsoleColour(CC_BrightYellow, CC_DarkRed);
+  printf("[EXCEPTION TRIGGERED: 0x%" PRIX64 "]", (uint64_t)pExceptionInfo->ExceptionRecord->ExceptionCode);
+  fflush(stdout);
+  ResetConsoleColour();
+  puts("");
+
+  for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+  {
+    if (recentValues[i].pLocation == NULL)
+      continue;
+
+    PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, g_pState->pStack, g_pState->pCode);
+
+    recentValues[i].age++;
+    recentValues[i].lastDisplayAge = recentValues[i].age;
+  }
+
+  puts("Registers:");
+  for (size_t i = 0; i < LLS_IREGISTER_COUNT; i++)
+  {
+    printf("\t% 3" PRIu64 ": %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ") \t", i, iregister[i], *(int64_t *)&iregister[i], iregister[i]);
+    LOG_U64_AS_STRING(iregister[i]);
+    puts("");
+    LOG_INSPECT_INTEGER(iregister[i], g_pState);
+  }
+
+  for (size_t i = 0; i < LLS_FREGISTER_COUNT; i++)
+    printf("\t% 3" PRIu64 ": %d\n", i + 8, fregister[i]);
+
+  printf("\tCMP: %" PRIu8 "\n", cmp);
+  printf("\nStack Offset: %" PRIu64 "\n", (size_t)pStack - (size_t)g_pState->pStack);
+  puts("");
+
+  fflush(stdout);
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
 #else
 #define LOG_INSTRUCTION_NAME(x)
 #define LOG_ENUM(x)
@@ -309,28 +361,30 @@ __forceinline void CopyBytes(void *pTarget, const void *pSource, size_t bytes)
     ((uint8_t *)pTarget)[i] = ((const uint8_t *)pSource)[i];
 }
 
-#define LLS_IREGISTER_COUNT (8)
-#define LLS_FREGISTER_COUNT (8)
-
 #if !defined(LLS_DEBUG_MODE) && !defined(LLS_NOT_POSITION_INDEPENDENT)
 __forceinline
 #endif
 void llshost_EvaluateCode(llshost_state_t *pState)
 {
+#ifndef LLS_DEBUG_MODE
   uint8_t *pStack = pState->pStack;
   lls_code_t *pCodePtr = pState->pCode;
 
   uint64_t iregister[LLS_IREGISTER_COUNT];
   double fregister[LLS_FREGISTER_COUNT];
   bool cmp = false;
+#else
+  pStack = pState->pStack;
+  pCodePtr = pState->pCode;
+  g_pState = pState;
+#endif
 
   CopyBytes(iregister, pState->registerValues, sizeof(iregister));
   CopyBytes(fregister, pState->registerValues + 8, sizeof(fregister));
 
 #ifdef LLS_DEBUG_MODE
   SetConsoleCtrlHandler(EventHandlerFunc, TRUE);
-
-  RecentVariableReference recentValues[6];
+  SetUnhandledExceptionFilter(TopLevelExceptionHandler);
 
   for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
     recentValues[i].pLocation = NULL;
@@ -2574,14 +2628,14 @@ void llshost_position_independent()
 
 uint64_t __lls__call_func(const uint64_t *pStack);
 
-uint8_t llshost(void *pCodePtr)
+uint8_t llshost(void *_pCodePtr)
 {
   llshost_state_t state;
 
   for (size_t i = 0; i < sizeof(state); i++)
     ((uint8_t *)&state)[i] = 0;
 
-  state.pCode = pCodePtr;
+  state.pCode = _pCodePtr;
 #pragma warning(push)
 #pragma warning(disable: 4054)
   state.pCallFuncShellcode = (const void *)__lls__call_func;
@@ -2622,7 +2676,7 @@ uint8_t llshost_from_state(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *_pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
 {
   fflush(stdout);
   SetConsoleColour(isHighlighted ? CC_Black : (isNewReference ? CC_BrightCyan : CC_BrightBlue), isHighlighted ? CC_DarkGray : CC_Black);
@@ -2638,7 +2692,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
   {
   case PT_OnStack:
     printf(" @ stack offset %" PRIi64 " ", (int64_t)pVariableInfo->position);
-    pLocation = pStack - pVariableInfo->position;
+    pLocation = _pStack - pVariableInfo->position;
     break;
 
   case PT_InRegister:
@@ -2739,7 +2793,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint8_t *pValue = *(uint8_t **)pLocation;
     printf(" (ptr<other>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 32, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 32, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2777,7 +2831,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint8_t *pValue = *(uint8_t **)pLocation;
     printf(" (ptr<u8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2797,7 +2851,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int8_t *pValue = *(int8_t **)pLocation;
     printf(" (ptr<i8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2835,7 +2889,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint16_t *pValue = *(uint16_t **)pLocation;
     printf(" (ptr<u16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2855,7 +2909,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int16_t *pValue = *(int16_t **)pLocation;
     printf(" (ptr<i16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2875,7 +2929,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint32_t *pValue = *(uint32_t **)pLocation;
     printf(" (ptr<u32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2895,7 +2949,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int32_t *pValue = *(int32_t **)pLocation;
     printf(" (ptr<i32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2915,7 +2969,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint64_t *pValue = *(uint64_t **)pLocation;
     printf(" (ptr<u64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2935,7 +2989,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int64_t *pValue = *(int64_t **)pLocation;
     printf(" (ptr<i64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2955,7 +3009,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const float *pValue = *(float **)pLocation;
     printf(" (ptr<f32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2975,7 +3029,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const double *pValue = *(double **)pLocation;
     printf(" (ptr<f64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -2995,7 +3049,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint8_t *pValue = (uint8_t *)pLocation;
     printf(" (array<other>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3033,7 +3087,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint8_t *pValue = (uint8_t *)pLocation;
     printf(" (array<u8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3053,7 +3107,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int8_t *pValue = (int8_t *)pLocation;
     printf(" (array<i8>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3091,7 +3145,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint16_t *pValue = (uint16_t *)pLocation;
     printf(" (array<u16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3111,7 +3165,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int16_t *pValue = (int16_t *)pLocation;
     printf(" (array<i16>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3131,7 +3185,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint32_t *pValue = (uint32_t *)pLocation;
     printf(" (array<u32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3151,7 +3205,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int32_t *pValue = (int32_t *)pLocation;
     printf(" (array<i32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3171,7 +3225,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const uint64_t *pValue = (uint64_t *)pLocation;
     printf(" (array<u64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3191,7 +3245,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const int64_t *pValue = (int64_t *)pLocation;
     printf(" (array<i64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3211,7 +3265,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const float *pValue = (float *)pLocation;
     printf(" (array<f32>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }
@@ -3231,7 +3285,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     const double *pValue = (double *)pLocation;
     printf(" (array<f64>) : 0x%" PRIX64 "\n --> ", (size_t)pValue);
 
-    if (_IsBadReadPtr(pValue, 24, pStack, pCodeBase))
+    if (_IsBadReadPtr(pValue, 24, _pStack, pCodeBase))
     {
       puts("<BAD_PTR>");
     }

@@ -4,6 +4,8 @@
 
 #include <conio.h>
 
+#include <Windows.h>
+
 #include "llshost.h"
 
 #ifdef LLS_DEBUG_MODE
@@ -41,11 +43,11 @@ int32_t main(const int32_t argc, const char **pArgv)
       return -1;
     }
 
-    pByteCode = (uint8_t *)malloc(fileSize);
+    pByteCode = (uint8_t *)VirtualAlloc((void *)0x7FF50BC00000ULL, (fileSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
 
     if (pByteCode == NULL)
     {
-      fputs("Memory Allocation Failure.", stderr);
+      fputs("Memory Allocation Failure (ByteCode).", stderr);
       return -1;
     }
 
@@ -78,11 +80,11 @@ int32_t main(const int32_t argc, const char **pArgv)
       return -1;
     }
 
-    pDebugDatabase = malloc(fileSize);
+    pDebugDatabase = (uint8_t *)VirtualAlloc((void *)0x7FF50DB00000ULL, (fileSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
 
     if (pDebugDatabase == NULL)
     {
-      fputs("Memory Allocation Failure.", stderr);
+      fputs("Memory Allocation Failure (DebugInfo).", stderr);
       return -1;
     }
 
@@ -99,11 +101,16 @@ int32_t main(const int32_t argc, const char **pArgv)
   memset(&state, 0, sizeof(state));
   
   state.pCode = pByteCode;
+  state.stackSize = LLS_DEFUALT_STACK_SIZE;
+  state.pStack = (uint8_t *)VirtualAlloc((void *)0x7FF505700000ULL, (state.stackSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
 
-  static uint8_t stack[LLS_DEFUALT_STACK_SIZE];
-  memset(stack, 0, sizeof(stack));
-  state.pStack = stack;
-  state.stackSize = sizeof(stack);
+  if (state.pStack == NULL)
+  {
+    fputs("Failed to allocate runtime stack.", stderr);
+    return -1;
+  }
+
+  memset(state.pStack, 0, state.stackSize);
 
   llshost_from_state(&state);
 
