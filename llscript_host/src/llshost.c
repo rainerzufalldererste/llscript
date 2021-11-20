@@ -252,6 +252,39 @@ bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBas
 
 void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
 
+bool stepInstructions = true;
+
+extern BOOL WINAPI EventHandlerFunc(DWORD signal)
+{
+  if (signal == CTRL_C_EVENT)
+  {
+    fflush(stdout);
+    SetConsoleColour(CC_BrightYellow, CC_DarkRed);
+    printf("[Ctrl-C]");
+    fflush(stdout);
+    ResetConsoleColour();
+    puts("");
+
+    if (stepInstructions)
+      exit(-1);
+    else
+      stepInstructions = true;
+  }
+  else
+  {
+    fflush(stdout);
+    SetConsoleColour(CC_BrightYellow, CC_DarkRed);
+    printf("[SIGNAL 0x$" PRIX32 " RECEIVED]", signal);
+    fflush(stdout);
+    ResetConsoleColour();
+    puts("");
+
+    exit(-2);
+  }
+
+  return TRUE;
+}
+
 #else
 #define LOG_INSTRUCTION_NAME(x)
 #define LOG_ENUM(x)
@@ -295,13 +328,14 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   CopyBytes(fregister, pState->registerValues + 8, sizeof(fregister));
 
 #ifdef LLS_DEBUG_MODE
+  SetConsoleCtrlHandler(EventHandlerFunc, TRUE);
+
   RecentVariableReference recentValues[6];
 
   for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
     recentValues[i].pLocation = NULL;
 
   bool silent = false;
-  bool stepInstructions = true;
   bool stepOut = false;
   bool keepRecentValues = true;
   bool stepByLine = false;
@@ -359,6 +393,17 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             break;
           }
         }
+
+        //if (pEntry == NULL)
+        //{
+        //  fflush(stdout);
+        //  SetConsoleColour(CC_BrightRed, CC_Black);
+        //
+        //  printf("<NOT INCLUDED IN DEBUG INFO! (@ 0x%" PRIX64 " | Scanned: 0x%" PRIX64 " - 0x%" PRIX64 ")>\n", address, pHeader->entries[0].instruction, pHeader->entries[pHeader->entryCount - 1].instruction);
+        //
+        //  fflush(stdout);
+        //  ResetConsoleColour();
+        //}
       }
       else
       {

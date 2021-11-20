@@ -101,11 +101,13 @@ namespace llsc
         return definedVariables[name];
 
       var parent = parentScope;
+      bool inFunction = isFunction;
       bool functionLeft = false;
 
       while (parent != null)
       {
-        functionLeft |= (parent.isFunction != isFunction);
+        inFunction |= parent.isFunction;
+        functionLeft |= !parent.isFunction && inFunction;
 
         if (parent.definedVariables != null && parent.definedVariables.ContainsKey(name) && (!functionLeft || parent.definedVariables[name].isStatic))
           return parent.definedVariables[name];

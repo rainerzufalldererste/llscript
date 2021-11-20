@@ -77,8 +77,28 @@ namespace llsc
       value.hasPosition = false;
       value.position.type = PositionType.Invalid;
 
-      if (Compiler.DetailedIntermediateOutput)
+      if (Compiler.DetailedIntermediateOutput && value is CNamedValue)
         instructions.Add(new LLI_Comment_PseudoInstruction("Dumping Value: " + value));
+    }
+
+    public void MarkValueAsPosition(CValue value, Position position, SharedValue<long> stackSize, bool isTouched)
+    {
+      if (position.type == PositionType.InRegister)
+        registers[position.registerIndex] = value;
+
+
+      value.hasPosition = true;
+      value.position = position;
+
+      instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+
+      if (isTouched)
+        MarkValueAsTouched(value);
+    }
+
+    public void MarkValueAsTouched(CValue value)
+    {
+      value.lastTouchedInstructionCount = instructions.Count();
     }
 
     public int GetFreeIntegerRegister(SharedValue<long> stackSize)
@@ -98,7 +118,7 @@ namespace llsc
       }
 
       int oldestIndex = -1;
-      int oldestValue = 0;
+      int oldestValue = instructions.Count;
 
       // With Home.
 
@@ -153,7 +173,7 @@ namespace llsc
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i].remainingReferences == 0 && !registerLocked[i])
+        if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           DumpValue(registers[i]);
           registers[i] = null;
@@ -161,7 +181,7 @@ namespace llsc
         }
 
       int oldestIndex = -1;
-      int oldestValue = 0;
+      int oldestValue = instructions.Count;
 
       // With Home.
 
@@ -295,17 +315,35 @@ namespace llsc
       if (registers[registerIndex] == null)
         return;
 
+      if (!registers[registerIndex].hasPosition)
+        throw new Exception($"Internal Compiler Error when trying to remove {registers[registerIndex]} from r:{registerIndex}, which is claiming to not live anywhere.");
+
+      if (registers[registerIndex].position.type != PositionType.InRegister || registers[registerIndex].position.registerIndex != registerIndex)
+        throw new Exception($"Internal Compiler Error when trying to remove {registers[registerIndex]} from r:{registerIndex}, which is claiming to live in {registers[registerIndex].position}.");
+
       if (registers[registerIndex] is CNamedValue)
       {
         var value = registers[registerIndex] as CNamedValue;
-
-        if (!value.hasPosition)
-          throw new Exception($"Internal Compiler Error when trying to remove {value} from r:{registerIndex}, which is claiming to not live anywhere.");
-
-        if (value.position.type != PositionType.InRegister || value.position.registerIndex != registerIndex)
-          throw new Exception($"Internal Compiler Error when trying to remove {value} from r:{registerIndex}, which is claiming to live in {value.position}.");
-
         MoveRegisterValueToHome(value, stackSize);
+      }
+      else if (registers[registerIndex].remainingReferences > 0)
+      {
+        var value = registers[registerIndex];
+
+        if (value is CConstFloatValue || value is CConstFloatValue)
+        {
+          DumpValue(value);
+        }
+        else
+        {
+          var newPosition = Position.StackOffset(stackSize.Value);
+          stackSize.Value += value.type.GetSize();
+
+          if (Compiler.DetailedIntermediateOutput)
+            instructions.Add(new LLI_Comment_PseudoInstruction($"Moving temporary value '{value}' to the stack ({value.remainingReferences} references remaining), because we're running out of registers."));
+
+          MoveValueToPosition(value, newPosition, stackSize, false);
+        }
       }
 
       registers[registerIndex] = null;
@@ -508,7 +546,7 @@ namespace llsc
       instructions.Add(new LLI_AndImm(registerIndex, BitConverter.GetBytes(((ulong)1 << (int)(bytes * 8)) - 1)));
     }
 
-    public void MoveValueToPosition(CValue sourceValue, Position targetPosition, SharedValue<long> stackSize, bool addReference)
+    public void MoveValueToPosition(CValue sourceValue, Position targetPosition, SharedValue<long> stackSize, bool isTouched)
     {
       // TODO: Work out the reference count...
 
@@ -516,14 +554,7 @@ namespace llsc
         throw new Exception($"Internal Compiler Error: Value '{sourceValue}' cannot be moved, because it's > 8 bytes.");
 
       CopyValueToPosition(sourceValue, targetPosition, stackSize);
-
-      if (targetPosition.type == PositionType.InRegister)
-        registers[targetPosition.registerIndex] = sourceValue;
-
-      sourceValue.hasPosition = true;
-      sourceValue.position = targetPosition;
-
-      instructions.Add(new LLI_Location_PseudoInstruction(sourceValue, stackSize, this));
+      MarkValueAsPosition(sourceValue, targetPosition, stackSize, isTouched);
     }
 
     public void CopyValueToPositionWithCast(CValue sourceValue, Position targetPosition, CType targetType, SharedValue<long> stackSize)
@@ -642,7 +673,7 @@ namespace llsc
 
       if (value is CConstIntValue)
       {
-        int registerIndex = this.GetFreeIntegerRegister(stackSize);
+        int registerIndex = GetFreeIntegerRegister(stackSize);
 
         instructions.Add(new LLI_MovImmToRegister((byte)registerIndex, BitConverter.GetBytes((value as CConstIntValue).uvalue)));
 
@@ -654,7 +685,7 @@ namespace llsc
       }
       else if (value is CConstFloatValue)
       {
-        int registerIndex = this.GetFreeFloatRegister(stackSize);
+        int registerIndex = GetFreeFloatRegister(stackSize);
 
         instructions.Add(new LLI_MovImmToRegister((byte)registerIndex, BitConverter.GetBytes((value as CConstFloatValue).value)));
 
@@ -673,10 +704,12 @@ namespace llsc
         {
           if (registers[value.position.registerIndex] != value)
           {
-            string expectedValue = registers[value.position.registerIndex]?.ToString() ?? "{null}";
-            instructions.Add(new LLI_Comment_PseudoInstruction($"!!! Compiler Error: r:{value.position.registerIndex} is {expectedValue} but was expected to be {value}."));
-            throw new Exception("Internal Compiler Error.");
+            string actualValue = registers[value.position.registerIndex]?.ToString() ?? "{null}";
+            instructions.Add(new LLI_Comment_PseudoInstruction($"!!! Compiler Error: r:{value.position.registerIndex} contains {actualValue} but {value} claimed to inhabit it."));
+            throw new Exception($"Internal Compiler Error. r:{value.position.registerIndex} contains {actualValue} but {value} claimed to inhabit it.");
           }
+
+          MarkValueAsTouched(value);
 
           return (byte)value.position.registerIndex;
         }
@@ -686,14 +719,11 @@ namespace llsc
 
           instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, value.position.stackOffsetForward, (byte)registerIndex));
 
-          registers[registerIndex] = value;
-          value.position = Position.Register(registerIndex);
-
           // Truncate smaller types.
           if (value.type.GetSize() < 8)
             TruncateValueInRegister(value);
 
-          instructions.Add(new LLI_Location_PseudoInstruction(value, stackSize, this));
+          MarkValueAsPosition(value, Position.Register(registerIndex), stackSize, true);
 
           return (byte)registerIndex;
         }
@@ -702,10 +732,9 @@ namespace llsc
           var registerIndex = (!(value.type is BuiltInCType) || !(value.type as BuiltInCType).IsFloat()) ? GetFreeIntegerRegister(stackSize) : GetFreeFloatRegister(stackSize);
 
           using (LockRegister(registerIndex))
-            MoveValueToPosition(value, Position.Register(registerIndex), stackSize, false);
+            MoveValueToPosition(value, Position.Register(registerIndex), stackSize, true);
 
-          registers[registerIndex] = value;
-          value.position = Position.Register(registerIndex);
+          MarkValueAsPosition(value, Position.Register(registerIndex), stackSize, true);
 
           return (byte)registerIndex;
         }

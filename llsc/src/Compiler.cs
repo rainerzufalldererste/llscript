@@ -115,7 +115,21 @@ namespace llsc
               {
                 var assumption = argument.Substring("-assume=".Length).Trim('\'', '\"');
 
-                typeof(Compiler.Assumptions).GetField(assumption).SetValue(null, true);
+                var field = typeof(Compiler.Assumptions).GetField(assumption);
+
+                if (field != null)
+                {
+                  field.SetValue(null, true);
+                }
+                else
+                {
+                  Console.WriteLine($"Invalid assumption '{assumption}'.\n\nAvailable Assumptions:");
+
+                  foreach (var x in typeof(Compiler.Assumptions).GetFields())
+                    Console.WriteLine(x.Name);
+
+                  Error($"Aborting.", null, 0);
+                }
               }
               else
               {
@@ -1459,13 +1473,15 @@ namespace llsc
         }
         else
         {
+          int index = 0;
+
           foreach (var instruction in childScope.instructions)
           {
             LLInstruction.currentFile = instruction.file;
             LLInstruction.currentLine = instruction.line;
 
             if (DetailedIntermediateOutput)
-              byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction}"));
+              byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction($"Intermediate Instruction Type: {instruction} (#{function}:{index++})"));
 
             instruction.GetLLInstructions(ref byteCodeState);
           }

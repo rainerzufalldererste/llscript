@@ -49,12 +49,33 @@ string CallProcess(string processName, string args, out int exitCode)
   return outputBuilder.ToString();
 }
 
+string scriptFile = "tmp/code.lls";
+
+void TestWithParams(string test, string param)
+{
+  Console.WriteLine("\t" + (string.IsNullOrEmpty(param) ? "(default)" : param));
+ 
+  string byteCodeFile = "tmp/bytecode.lls";
+
+  string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile}{param} -o=\"{byteCodeFile}\"", out int exitCode);
+ 
+  if (exitCode != 0)
+    Fail($"Failed to compile test {test}\n\n{output}");
+  
+  output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
+ 
+  if (exitCode != 0)
+    Fail($"Failed to execute test {test}\n\n{output}");
+ 
+  var expected = File.ReadAllText(test.Replace("lls", "txt"));
+  
+  if (expected != output)
+    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
+}
+
 try
 {
   Directory.CreateDirectory("tmp");
-
-  string scriptFile = "tmp/code.lls";
-  string byteCodeFile = "tmp/bytecode.lls";
 
   var tests = Directory.GetFiles("tests/", "*.lls");
 
@@ -62,88 +83,21 @@ try
 
   foreach (var test in tests)
   {
-    Console.WriteLine($"Testing {test} ...");
+    Console.WriteLine($"Testing {test} ...\n");
 
     File.Copy(test, scriptFile, true);
 
-    // Regular
-    {
-      Console.WriteLine("\tnormal");
+    string[] ps = new string[]{ " -S+", " -O0", " -dbgdb", " -assume=ByteCodeMutable" };
 
-      string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile} -S+ -dbgdb -o=\"{byteCodeFile}\"", out int exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to compile test {test}\n\n{output}");
-      
-      output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to execute test {test}\n\n{output}");
-  
-      var expected = File.ReadAllText(test.Replace("lls", "txt"));
-      
-      if (expected != output)
-        Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
-    }
-
-    // -O0
+    for (int i = 0; i < (2 << (ps.Length - 1)); i++)
     {
-      Console.WriteLine("\t-O0");
-      
-      string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile} -S+ -dbgdb -O0 -o=\"{byteCodeFile}\"", out int exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to compile test {test}\n\n{output}");
-      
-      output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to execute test {test}\n\n{output}");
-  
-      var expected = File.ReadAllText(test.Replace("lls", "txt"));
-      
-      if (expected != output)
-        Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
-    }
+      string param = "";
 
-    // -assume=ByteCodeMutable
-    {
-      Console.WriteLine("\t-assume=ByteCodeMutable");
+      for (int j = 0; j < ps.Length; j++)
+        if ((i & (1 << j)) != 0)
+          param += ps[j];
       
-      string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile} -S+ -dbgdb -assume=ByteCodeMutable -o=\"{byteCodeFile}\"", out int exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to compile test {test}\n\n{output}");
-      
-      output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to execute test {test}\n\n{output}");
-  
-      var expected = File.ReadAllText(test.Replace("lls", "txt"));
-      
-      if (expected != output)
-        Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
-    }
-
-    // -assume=ByteCodeMutable -O0
-    {
-      Console.WriteLine("\t-assume=ByteCodeMutable -O0");
-      
-      string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile} -S+ -dbgdb -assume=ByteCodeMutable -O0 -o=\"{byteCodeFile}\"", out int exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to compile test {test}\n\n{output}");
-      
-      output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
-  
-      if (exitCode != 0)
-        Fail($"Failed to execute test {test}\n\n{output}");
-  
-      var expected = File.ReadAllText(test.Replace("lls", "txt"));
-      
-      if (expected != output)
-        Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
+      TestWithParams(test, param);
     }
 
     Console.WriteLine("\n");
