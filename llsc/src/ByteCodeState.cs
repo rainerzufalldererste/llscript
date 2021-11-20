@@ -411,6 +411,9 @@ namespace llsc
             // No Registers Available, We'll free one up and then restore it's original value.
             byte chosenRegister = (byte)((registerIndex + 1) % Compiler.IntegerRegisters);
 
+            if (Compiler.DetailedIntermediateOutput)
+              instructions.Add(new LLI_Comment_PseudoInstruction($"Temporarily using r:{chosenRegister} to store the pointer to {value}."));
+
             instructions.Add(new LLI_PushRegister(chosenRegister));
 
             if (storeInCodeBase)

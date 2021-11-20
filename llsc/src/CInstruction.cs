@@ -91,6 +91,7 @@ namespace llsc
         byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(param.value, function.minStackSize, byteCodeState));
 
       byteCodeState.instructions.Add(new LLI_StackIncrementImm(function.minStackSize, 0));
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(new CValue(file, line, new PtrCType(VoidCType.Instance), true) { description = $"Instruction pointer of the calling function", hasPosition = true, position = Position.StackOffset(0) }, function.minStackSize, byteCodeState));
     }
   }
 
@@ -133,9 +134,15 @@ namespace llsc
           byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
 
       byteCodeState.instructions.Add(new LLI_StackDecrementImm(function.scope.maxRequiredStackSpace, 0));
+
+      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(new CValue(file, line, new PtrCType(VoidCType.Instance), true) { description = $"Instruction pointer of the calling function", hasPosition = true, position = Position.StackOffset(0) }, new SharedValue<long>(0), byteCodeState));
+
       byteCodeState.instructions.Add(new LLI_Return());
 
       byteCodeState.instructions.Add(new LLI_Comment_PseudoInstruction("End of Function: " + function));
+
+      if (function.OnFunctionEnd != null)
+        function.OnFunctionEnd();
     }
   }
 
@@ -578,6 +585,7 @@ namespace llsc
       else
       {
         byteCodeState.instructions.Add(new LLI_CallFunctionAtRelativeImm(function.functionStartLabel));
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(new CValue(file, line, new PtrCType(VoidCType.Instance), true) { description = $"Return Instruction pointer for function call to {function}", hasPosition = true, position = Position.StackOffset(0) }, new SharedValue<long>(0), byteCodeState));
 
         if (!(function.returnType is VoidCType))
         {
@@ -727,6 +735,7 @@ namespace llsc
         {
           byteCodeState.CopyPositionToRegisterInplace(chosenIntRegister, functionPtr.type.GetSize(), functionPtr.position, stackSize);
           byteCodeState.instructions.Add(new LLI_PushRegister((byte)chosenIntRegister));
+          pushedBytes += 8;
         }
         else
         {

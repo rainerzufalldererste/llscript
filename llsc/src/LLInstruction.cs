@@ -157,7 +157,7 @@ namespace llsc
 
   public class LLI_Location_PseudoInstruction : LLI_PseudoInstruction
   {
-    public DbgLocationInfo locationInfo { get; protected set; }
+    public DbgLocationInfo locationInfo;
 
     public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize, ByteCodeState byteCodeState) : base(0)
     {

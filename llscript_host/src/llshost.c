@@ -178,6 +178,7 @@ typedef struct
 {
   uint64_t age, lastDisplayAge;
   DebugDatabaseVariableLocation *pLocation;
+  bool highlighted;
 } RecentVariableReference;
 
 typedef enum
@@ -249,7 +250,7 @@ bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBas
   return true;
 }
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
 
 #else
 #define LOG_INSTRUCTION_NAME(x)
@@ -305,6 +306,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   bool keepRecentValues = true;
   bool stepByLine = false;
   bool isLineEnd = false;
+  bool hasFilter = false;
+  char filter[255];
   uint64_t breakpoint = (uint64_t)-1;
 
   stdOutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -314,7 +317,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
   SetConsoleColour(CC_DarkGray, CC_Black);
 
-  puts("llshost byte code interpreter.\n\n\t'c' to run / continue execution.\n\t'n' to step.\n\t'l' to step a line (only available with debug info).\n\t'f' to step out.\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t's' toggle silent.\n\t'q' to restart.\n\t'x' to quit.\n\t'z' to debug break.\n\n");
+  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
 
   ResetConsoleColour();
 #endif
@@ -425,7 +428,15 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       }
     }
 
-    if (isLineEnd && stepByLine)
+    bool breakpointHit = false;
+
+    if (address == breakpoint && !stepInstructions)
+    {
+      breakpointHit = true;
+      stepInstructions = true;
+    }
+
+    if ((isLineEnd && stepByLine) || (breakpointHit))
     {
       bool hasAny = false;
 
@@ -447,7 +458,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (recentValues[i].pLocation == NULL)
             continue;
 
-          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
           recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -456,10 +467,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
     }
 
     if (address == breakpoint)
-    {
       printf("\n\tBreakpoint Hit (0x%" PRIX64 ")!\n\n", breakpoint);
-      stepInstructions = true;
-    }
 
     if (stepInstructions)
     {
@@ -713,6 +721,43 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             puts("\nInvalid Option.");
             break;
           }
+
+          break;
+        }
+
+        case 'v':
+        {
+          for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+          {
+            if (recentValues[i].pLocation == NULL)
+              continue;
+
+            PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          }
+
+          break;
+        }
+
+        case 'w':
+        {
+          puts("filter?");
+
+          hasFilter = fgets(filter, sizeof(filter), stdin);
+
+          if (hasFilter)
+          {
+            for (size_t i = 0; i < sizeof(filter); i++)
+              if (filter[i] == '\n' || filter[i] == '\r')
+                filter[i] = '\0';
+
+            printf("\nfilter set to '%s'.\n", filter);
+          }
+          else
+          {
+            puts("Failed to read from stdin.");
+          }
+
+          break;
         }
 
         case 's':
@@ -1813,14 +1858,26 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_I64(value);
       LOG_INFO_START();
       LOG_X64(pCodePtr - pState->pCode);
+      LOG_INFO_START();
+      LOG_X64(pCodePtr);
+      LOG_INFO_END();
 
       ((uint64_t *)pStack)[0] = (uint64_t)pCodePtr;
       pCodePtr += value;
 
       LOG_STRING(" to ");
       LOG_X64(pCodePtr - pState->pCode);
+      LOG_INFO_START();
+      LOG_X64(pCodePtr);
+      LOG_INFO_END();
       LOG_INFO_END();
       LOG_END();
+
+#ifdef LLS_DEBUG_MODE
+      for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+        if (recentValues[i].pLocation != NULL && !recentValues[i].pLocation->isStatic)
+          recentValues[i].pLocation = NULL;
+#endif
 
       break;
     }
@@ -2164,32 +2221,48 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
 
-    if (keepRecentValues && !stepByLine)
+    if (keepRecentValues)
     {
-      bool hasAny = false;
-
-      for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+      if (!stepByLine && stepInstructions)
       {
-        if (recentValues[i].pLocation == NULL)
-          continue;
-
-        hasAny = true;
-        break;
-      }
-
-      if (hasAny)
-      {
-        puts(" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -");
+        bool hasAny = false;
 
         for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
         {
           if (recentValues[i].pLocation == NULL)
             continue;
 
-          PrintVariableInfo(recentValues[i].pLocation, false, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          hasAny = true;
+          break;
+        }
+
+        if (hasAny)
+        {
+          puts(" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -");
+
+          for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+          {
+            if (recentValues[i].pLocation == NULL)
+              continue;
+
+            PrintVariableInfo(recentValues[i].pLocation, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+
+            recentValues[i].age++;
+            recentValues[i].lastDisplayAge = recentValues[i].age;
+          }
+        }
+      }
+      else
+      {
+        for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+        {
+          if (recentValues[i].pLocation == NULL)
+            continue;
+
+          if (recentValues[i].highlighted)
+            PrintVariableInfo(recentValues[i].pLocation, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
-          recentValues[i].lastDisplayAge = recentValues[i].age;
         }
       }
     }
@@ -2207,9 +2280,10 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         {
           DebugDatabaseVariableLocation *pVariableInfo = (uint8_t *)pEntry + entryDataOffset + pEntry->offsets[pEntry->codeCount + pEntry->commentCount + i];
 
-          bool storeValue = pVariableInfo->isVariable && !pVariableInfo->isConst;
+          bool highlighted = hasFilter && strstr(pVariableInfo->name, filter);
+          const bool storeValue = highlighted || (pVariableInfo->isVariable && !pVariableInfo->isConst);
 
-          PrintVariableInfo(pVariableInfo, true, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          PrintVariableInfo(pVariableInfo, true, highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           if (storeValue)
           {
@@ -2237,8 +2311,9 @@ void llshost_EvaluateCode(llshost_state_t *pState)
                   if (strcmp(recentValues[j].pLocation->name, pVariableInfo->name) == 0)
                   {
                     replaceByMatch = j;
+                    highlighted |= recentValues[j].highlighted;
                   }
-                  else if (recentValues[j].age > oldestAge)
+                  else if (!recentValues[j].highlighted && recentValues[j].age > oldestAge)
                   {
                     replaceByAge = j;
                     oldestAge = recentValues[j].age;
@@ -2247,11 +2322,15 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               }
             }
 
-            const size_t replaceIndex = replaceByMatch != (size_t)-1 ? replaceByMatch : replaceByAge;
+            const size_t replaceIndex = (replaceByMatch != (size_t)-1) ? replaceByMatch : replaceByAge;
 
-            recentValues[replaceIndex].pLocation = pVariableInfo;
-            recentValues[replaceIndex].age = 0;
-            recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+            if (replaceIndex != (size_t)-1)
+            {
+              recentValues[replaceIndex].pLocation = pVariableInfo;
+              recentValues[replaceIndex].age = 0;
+              recentValues[replaceIndex].highlighted = highlighted;
+              recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+            }
           }
         }
 
@@ -2498,15 +2577,15 @@ uint8_t llshost_from_state(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
 {
   fflush(stdout);
-  SetConsoleColour(isNewReference ? CC_BrightCyan : CC_BrightBlue, CC_Black);
+  SetConsoleColour(isHighlighted ? CC_Black : (isNewReference ? CC_BrightCyan : CC_BrightBlue), isHighlighted ? CC_DarkGray : CC_Black);
 
   fputs(pVariableInfo->name, stdout);
 
   fflush(stdout);
-  SetConsoleColour(isNewReference ? CC_DarkCyan : CC_DarkBlue, CC_Black);
+  SetConsoleColour(isHighlighted ? CC_DarkRed : (isNewReference ? CC_DarkCyan : CC_DarkBlue), CC_Black);
 
   const void *pLocation = NULL;
 

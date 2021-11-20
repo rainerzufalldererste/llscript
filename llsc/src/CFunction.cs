@@ -18,6 +18,7 @@ namespace llsc
     public List<Node> nodes;
     public Scope scope;
     public LLI_Label_PseudoInstruction functionStartLabel, functionEndLabel;
+    public Action OnFunctionEnd = null;
 
     public CFunction(string name, CType returnType, IEnumerable<FunctionParameter> parameters, string file, int line)
     {
