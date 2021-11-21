@@ -315,6 +315,8 @@ namespace llsc
 
         Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned to '{targetValue}', because there is no implicit conversion available.", file, line);
       }
+
+      this.sourceValue.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -336,33 +338,18 @@ namespace llsc
         if (targetValue is CNamedValue && (targetValue as CNamedValue).hasHomePosition)
           (targetValue as CNamedValue).modifiedSinceLastHome = true;
 
-        byteCodeState.registers[targetValue.position.registerIndex] = targetValue;
-        sourceValue.hasPosition = false;
-        sourceValue.position.type = PositionType.Invalid;
-        
+        sourceValue.remainingReferences--;
+        byteCodeState.DumpValue(sourceValue);
+
+        byteCodeState.MarkValueAsPosition(targetValue, targetValue.position, stackSize, true);
+        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
+
         if (sourceValue.type.GetSize() > targetValue.type.GetSize())
           byteCodeState.TruncateRegister(sourceValue.position.registerIndex, targetValue.type.GetSize());
 
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
         
         return;
       }
-      // This is too dangerous because I believe we don't properly keep track of references.
-      //// if setting the target to a named value that has no more references in the future (and is of the same size).
-      //else if (sourceValue is CNamedValue && sourceValue.hasPosition && sourceValue.remainingReferences == 0 && sourceValue.type.GetSize() == targetValue.type.GetSize())
-      //{
-      //  targetValue.hasPosition = true;
-      //  sourceValue.hasPosition = false;
-      //  
-      //  targetValue.position = sourceValue.position;
-      //
-      //  sourceValue.isInitialized = false;
-      //  targetValue.isInitialized = true;
-      //
-      //  (targetValue as CNamedValue).hasStackOffset = (sourceValue as CNamedValue).hasStackOffset;
-      //  (targetValue as CNamedValue).homeStackOffset = (sourceValue as CNamedValue).homeStackOffset;
-      //  (sourceValue as CNamedValue).hasStackOffset = false;
-      //}
 
       if (!targetValue.hasPosition)
       {
@@ -377,8 +364,24 @@ namespace llsc
         }
         else
         {
-          // Place on stack.
-          targetValue.position = Position.StackOffset(stackSize.Value);
+          bool storeInCodeBase = targetValue is CNamedValue && (targetValue as CNamedValue).isStatic && Compiler.Assumptions.ByteCodeMutable; // All the const options are gone, because we're currently in the process of assigning a value to `targetValue`, so it better not be const...
+          bool storeOnGlobalStack = !storeInCodeBase && targetValue is CNamedValue && (targetValue as CNamedValue).isStatic;
+
+          if (storeInCodeBase)
+          {
+            targetValue.position = Position.CodeBaseOffset(targetValue, new byte[targetValue.type.GetSize()], targetValue.file, targetValue.line);
+            byteCodeState.postInstructionDataStorage.Add(targetValue.position.codeBaseOffset);
+          }
+          else if (storeOnGlobalStack)
+          {
+            targetValue.position = Position.GlobalStackBaseOffset(Compiler.GlobalScope.maxRequiredStackSpace.Value);
+            Compiler.GlobalScope.maxRequiredStackSpace.Value += targetValue.type.GetSize();
+          }
+          else
+          {
+            targetValue.position = Position.StackOffset(stackSize.Value);
+            stackSize.Value += targetValue.type.GetSize();
+          }
 
           if (targetValue is CNamedValue)
           {
@@ -388,13 +391,13 @@ namespace llsc
             t.homePosition = targetValue.position;
             t.modifiedSinceLastHome = false;
           }
-
-          stackSize.Value += targetValue.type.GetSize();
         }
       }
 
       byteCodeState.CopyValueToPosition(sourceValue, targetValue.position, stackSize);
-      byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
+      sourceValue.remainingReferences--;
+
+      byteCodeState.MarkValueAsPosition(targetValue, targetValue.position, stackSize, true);
 
       if (targetValue is CNamedValue)
       {
@@ -419,6 +422,9 @@ namespace llsc
       this.targetValuePtr = targetValuePtr;
       this.sourceValue = sourceValue;
       this.stackSize = stackSize;
+
+      targetValuePtr.remainingReferences++;
+      sourceValue.remainingReferences++;
 
       if (!sourceValue.type.CanImplicitCastTo((targetValuePtr.type as PtrCType).pointsTo))
         Compiler.Error($"Type Mismatch: '{sourceValue}' cannot be assigned dereference of {targetValuePtr} to of type '{(targetValuePtr.type as PtrCType).pointsTo}', because there is no implicit conversion available.", file, line);
@@ -517,6 +523,8 @@ namespace llsc
 
         if (!arguments[i].type.CanImplicitCastTo(function.parameters[i].type))
           Compiler.Error($"In function call to '{function}': Argument {(i + 1)} '{arguments[i]}' for parameter {function.parameters[i].type} {function.parameters[i].name} is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+
+        arguments[i].remainingReferences++;
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
@@ -628,6 +636,8 @@ namespace llsc
 
         if (!arguments[i].type.CanImplicitCastTo(function.parameters[i]))
           Compiler.Error($"In function call to '{functionPtr}': Argument {(i + 1)} '{arguments[i]}' for parameter of type '{function.parameters[i]}' is of mismatching type '{arguments[i].type}' and cannot be converted implicitly. Value defined in File '{arguments[i].file ?? "?"}', Line: {arguments[i].line}.", file, line);
+
+        arguments[i].remainingReferences++;
       }
 
       if (function.returnType is BuiltInCType || function.returnType is PtrCType)
@@ -903,6 +913,8 @@ namespace llsc
       this.value = value;
       this.outValue = outValue = new CValue(file, line, ((PtrCType)(value.type)).pointsTo, true) { description = $"dereference of '{value}'" };
       this.stackSize = stackSize;
+
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -963,6 +975,8 @@ namespace llsc
       this.source = source;
       this.target = target;
       this.stackSize = stackSize;
+
+      source.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1020,12 +1034,16 @@ namespace llsc
       this.label = label;
       this.stackSize = stackSize;
       this.backupRegisters = backupRegisters;
+
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
     {
       byte registerIndex = byteCodeState.MoveValueToAnyRegister(value, stackSize);
       byteCodeState.instructions.Add(new LLI_CmpNotEq_ImmRegister(BitConverter.GetBytes((long)0), registerIndex));
+
+      value.remainingReferences--;
 
       if (backupRegisters)
         byteCodeState.BackupRegisterValues(stackSize);
@@ -1079,6 +1097,7 @@ namespace llsc
         this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public CInstruction_AddImm(CValue value, ulong imm, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
@@ -1100,6 +1119,7 @@ namespace llsc
         this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public CInstruction_AddImm(CValue value, double imm, SharedValue<long> stackSize, bool toSelf, out CValue resultingValue, string file, int line) : base(file, line)
@@ -1121,6 +1141,7 @@ namespace llsc
         this.resultingValue = new CValue(file, line, value.type, true) { description = $"({value} + {imm})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1194,6 +1215,8 @@ namespace llsc
       }
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1284,6 +1307,8 @@ namespace llsc
         this.resultingValue = new CValue(file, line, left.type.GetSize() >= right.type.GetSize() ? left.type : right.type, true) { description = $"({left} - {right})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1375,6 +1400,8 @@ namespace llsc
       }
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1467,6 +1494,8 @@ namespace llsc
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1558,6 +1587,8 @@ namespace llsc
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1647,6 +1678,8 @@ namespace llsc
       }
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1731,6 +1764,8 @@ namespace llsc
         throw new Exception("Internal Compiler Error: operator cannot be applied to the lvalue directly if it's constant imm.");
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1839,6 +1874,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} == {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1887,6 +1924,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} != {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1937,6 +1976,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} <= {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -1987,6 +2028,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} >= {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2037,6 +2080,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} < {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2085,6 +2130,8 @@ namespace llsc
       this.resultingValue = new CValue(file, line, BuiltInCType.Types["u8"], true) { description = $"({lvalue} > {rvalue})" };
 
       resultingValue = this.resultingValue;
+      left.remainingReferences++;
+      right.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2132,6 +2179,7 @@ namespace llsc
       this.resultingValue = new CValue(file, line, value.type, true) { description = $"~({value})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2173,6 +2221,7 @@ namespace llsc
       this.resultingValue = new CValue(file, line, value.type, true) { description = $"!({value})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)
@@ -2214,6 +2263,7 @@ namespace llsc
       this.resultingValue = new CValue(file, line, value.type, true) { description = $"-({value})" };
 
       resultingValue = this.resultingValue;
+      value.remainingReferences++;
     }
 
     public override void GetLLInstructions(ref ByteCodeState byteCodeState)

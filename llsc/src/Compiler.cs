@@ -1252,7 +1252,6 @@ namespace llsc
             nodes.RemoveRange(0, nextEndLine + 1);
 
             var lvalue = GetLValue(scope, lnodes, ref byteCodeState, null);
-            lvalue.remainingReferences++;
 
             if (!(lvalue is CNamedValue))
               lvalue.description += " (lvalue)";
@@ -1290,7 +1289,6 @@ namespace llsc
               nodes.RemoveRange(0, nextEndLine + 1);
 
               var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
-              rvalue.remainingReferences++;
 
               if (!(rvalue is CNamedValue))
                 rvalue.description += " (rvalue)";
@@ -1299,8 +1297,6 @@ namespace llsc
                 Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
 
               var ptrValue = GetRValue(scope, paramNodes, ref byteCodeState);
-
-              ptrValue.remainingReferences++;
 
               if (!(ptrValue is CNamedValue))
                 ptrValue.description += " (rvalue)";
@@ -1347,7 +1343,6 @@ namespace llsc
               nodes.RemoveRange(0, nextEndLine + 1);
 
               var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
-              rvalue.remainingReferences++;
 
               if (!(rvalue is CNamedValue))
                 rvalue.description += " (rvalue)";
@@ -1356,8 +1351,6 @@ namespace llsc
                 Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
 
               var subScriptValue = GetRValue(scope, paramNodes, ref byteCodeState);
-
-              subScriptValue.remainingReferences++;
 
               if (!(subScriptValue is CNamedValue))
                 subScriptValue.description += " (rvalue)";
@@ -1378,7 +1371,6 @@ namespace llsc
               nodes.RemoveRange(0, nextEndLine + 1);
 
               var rvalue = GetRValue(scope, rnodes, ref byteCodeState);
-              rvalue.remainingReferences++;
 
               if (!(rvalue is CNamedValue))
                 rvalue.description += " (rvalue)";
@@ -1396,7 +1388,6 @@ namespace llsc
               }
 
               var lvalue = GetLValue(scope, lnodes, ref byteCodeState, rvalue.type);
-              lvalue.remainingReferences++;
 
               if (!(lvalue is CNamedValue))
                 lvalue.description += " (lvalue)";
@@ -1769,8 +1760,6 @@ namespace llsc
 
                   var param = GetRValue(scope, parameterNodes, ref byteCodeState);
 
-                  param.remainingReferences++;
-
                   if (!(param is CNamedValue))
                     param.description += " (rvalue)";
 
@@ -1844,8 +1833,6 @@ namespace llsc
               if (!(param is CNamedValue))
                 param.description += " (rvalue)";
 
-              param.remainingReferences++;
-
               parameters.Add(param);
 
               if (isLastParam)
@@ -1914,8 +1901,6 @@ namespace llsc
         if (nextOperator == 0)
         {
           var value = GetRValue(scope, nodes.GetRange(1, nodes.Count - 1), ref byteCodeState);
-
-          value.remainingReferences++;
           
           switch (operatorNode.operatorType)
           {
@@ -2035,9 +2020,6 @@ namespace llsc
 
             right = tmp;
           }
-
-          left.remainingReferences++;
-          right.remainingReferences++;
 
           switch (operatorNode.operatorType)
           {
@@ -2277,8 +2259,6 @@ namespace llsc
 
                   var param = GetRValue(scope, parameterNodes, ref byteCodeState);
 
-                  param.remainingReferences++;
-
                   if (!(param is CNamedValue))
                     param.description += " (rvalue)";
 
@@ -2298,7 +2278,6 @@ namespace llsc
             else if (nodes[1] is NOpenBracket)
             {
               var xvalue = GetXValue(scope, nodes, ref byteCodeState);
-              xvalue.remainingReferences++;
 
               CValue dereferencedValue;
 
@@ -2370,8 +2349,6 @@ namespace llsc
               
               var param = GetRValue(scope, parameterNodes, ref byteCodeState);
 
-              param.remainingReferences++;
-
               if (!(param is CNamedValue))
                 param.description += " (rvalue)";
 
@@ -2421,8 +2398,6 @@ namespace llsc
         }
         else
         {
-          rValueToCast.remainingReferences++;
-
           var ret = rValueToCast.MakeCastableClone(targetType, scope, ref byteCodeState, nodes[2].file, nodes[2].line);
           ret.description += " (rvalue to cast to '" + targetType + "')";
           
@@ -2525,7 +2500,6 @@ namespace llsc
           case NPseudoFunctionType.ValueOf:
             {
               var rvalue = GetRValue(scope, nodes.GetRange(1, nodes.Count - 2), ref byteCodeState);
-              rvalue.remainingReferences++;
 
               if (!(rvalue is CNamedValue))
                 rvalue.description += " (rvalue)";
@@ -2690,15 +2664,12 @@ namespace llsc
               return null; // Unreachable.
             }
 
-            ptrWithoutOffset.remainingReferences++;
-
             var index = GetRValue(scope, nodes.GetRange(1, nodes.Count - 2), ref byteCodeState);
 
             if (!(index is CNamedValue))
               index.description += " (rvalue)";
 
             CValue offsetPtr;
-            index.remainingReferences++;
             scope.instructions.Add(new CInstruction_Add(ptrWithoutOffset, index, scope.maxRequiredStackSpace, false, out offsetPtr, nodes[0].file, nodes[0].line));
 
             return offsetPtr;
