@@ -331,20 +331,19 @@ namespace llsc
         targetValue.hasPosition = true;
         targetValue.position = sourceValue.position;
         targetValue.isInitialized = true;
-
+      
         if (targetValue is CNamedValue && (targetValue as CNamedValue).hasHomePosition)
           (targetValue as CNamedValue).modifiedSinceLastHome = true;
-
+      
         sourceValue.remainingReferences--;
         byteCodeState.DumpValue(sourceValue);
-
+      
         byteCodeState.MarkValueAsPosition(targetValue, targetValue.position, stackSize, true);
         byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(targetValue, stackSize, byteCodeState));
-
+      
         if (sourceValue.type.GetSize() > targetValue.type.GetSize())
           byteCodeState.TruncateRegister(sourceValue.position.registerIndex, targetValue.type.GetSize());
-
-        
+      
         return;
       }
 

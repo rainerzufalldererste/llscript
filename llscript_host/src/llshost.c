@@ -401,6 +401,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   uint64_t breakpoint = (uint64_t)-1;
   uint64_t callStackCount = 0;
   bool breakOnFilterMatch = false;
+  bool breakOnFunction = false;
 
   stdOutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -409,7 +410,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
   SetConsoleColour(CC_DarkGray, CC_Black);
 
-  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'o' clear recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t'W' break on a value filter match (only available with debug info)\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
+  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'o' clear recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t'W' break on a value filter match (only available with debug info)\n\t'F' continue to next function call/return\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
 
   ResetConsoleColour();
 #endif
@@ -614,6 +615,12 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           stepInstructions = false;
           callStackCount = 0;
           goto continue_execution;
+
+        case 'F':
+        {
+          breakOnFunction = true;
+          goto continue_execution;
+        }
 
         case 'b':
           fputs("Set breakpoint to: 0x", stdout);
@@ -2183,6 +2190,9 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 #ifdef LLS_DEBUG_MODE
       globalCallStackCount++;
       callStackCount++;
+
+      if (breakOnFunction)
+        stepInstructions = true;
 #endif
 
       break;
@@ -2213,8 +2223,17 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         stepInstructions = true;
       }
 
+      if (globalCallStackCount == 0)
+      {
+        puts("INVALID `globalCallStackCount`.");
+        __debugbreak();
+      }
+
       globalCallStackCount--;
       callStackCount--;
+
+      if (breakOnFunction)
+        stepInstructions = true;
 #endif
 
       break;
@@ -2629,6 +2648,16 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               {
                 if (recentValues[j].pLocation->positionType == PT_InRegister && pVariableInfo->positionType == PT_InRegister && recentValues[j].pLocation->position == pVariableInfo->position)
                 {
+                  if (recentValues[j].highlighted)
+                  {
+                    fflush(stdout);
+                    SetConsoleColour(CC_Black, CC_DarkGray);
+                    printf("THIS REPLACES HIGHLIGHTED VALUE: '%s'.\n", recentValues[j].pLocation->name);
+                    fflush(stdout);
+                    ResetConsoleColour();
+                    stepInstructions = true;
+                  }
+
                   recentValues[j].pLocation = NULL;
                   replaceByAge = j;
                   oldestAge = (size_t)-1;
@@ -3072,7 +3101,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
         printf("%" PRIu8 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
         printf("0x%" PRIX8 ", ", pValue[i]);
@@ -3097,7 +3126,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("%" PRIi8 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("0x%" PRIX8 ", ", pValue[i]);
@@ -3140,7 +3169,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
         printf("%" PRIu16 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
         printf("0x%" PRIX16 ", ", pValue[i]);
@@ -3165,7 +3194,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
         printf("%" PRIi16 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
         printf("0x%" PRIX16 ", ", pValue[i]);
@@ -3190,6 +3219,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
         printf("%" PRIu32 ", ", pValue[i]);
 
+      fputs("...\n --> ", stdout);
+
+      for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
+        printf("0x%" PRIX32 ", ", pValue[i]);
+
       puts("...");
     }
 
@@ -3210,7 +3244,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
         printf("%" PRIi32 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
         printf("0x%" PRIX32 ", ", pValue[i]);
@@ -3235,7 +3269,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
         printf("%" PRIu64 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
         printf("0x%" PRIX64 ", ", pValue[i]);
@@ -3260,7 +3294,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("%" PRIi64 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("0x%" PRIX64 ", ", pValue[i]);
@@ -3363,7 +3397,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
         printf("%" PRIu8 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
         printf("0x%" PRIX8 ", ", pValue[i]);
@@ -3388,7 +3422,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("%" PRIi8 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("0x%" PRIX8 ", ", pValue[i]);
@@ -3431,7 +3465,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
         printf("%" PRIu16 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
         printf("0x%" PRIX16 ", ", pValue[i]);
@@ -3456,6 +3490,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
         printf("%" PRIi16 ", ", pValue[i]);
 
+      fputs("...\n --> ", stdout);
+
+      for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
+        printf("0x%" PRIX16 ", ", pValue[i]);
+
       puts("...");
     }
 
@@ -3476,7 +3515,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
         printf("%" PRIu32 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
         printf("0x%" PRIX32 ", ", pValue[i]);
@@ -3501,7 +3540,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
         printf("%" PRIi32 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
         printf("0x%" PRIX32 ", ", pValue[i]);
@@ -3526,7 +3565,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
         printf("%" PRIu64 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
         printf("0x%" PRIX64 ", ", pValue[i]);
@@ -3551,7 +3590,7 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint6
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("%" PRIi64 ", ", pValue[i]);
 
-      puts("...");
+      fputs("...\n --> ", stdout);
 
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("0x%" PRIX64 ", ", pValue[i]);
