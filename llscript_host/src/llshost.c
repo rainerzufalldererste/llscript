@@ -190,6 +190,7 @@ typedef struct
   uint64_t age, lastDisplayAge;
   DebugDatabaseVariableLocation *pLocation;
   bool highlighted;
+  uint64_t globalCallStackCount;
 } RecentVariableReference;
 
 typedef enum
@@ -253,13 +254,14 @@ void ResetConsoleColour()
     SetConsoleTextAttribute(stdOutHandle, GetWindowsConsoleColourFromConsoleColour(CC_BrightGray) | (GetWindowsConsoleColourFromConsoleColour(CC_Black) << 8));
 }
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint64_t callStackPos, const bool isNewReference, const bool isHighlighted, const uint8_t *pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase);
 
 llshost_state_t *g_pState = NULL;
 uint8_t *pStack = NULL;
 lls_code_t *pCodePtr = NULL;
 bool stepInstructions = true;
 RecentVariableReference recentValues[10];
+uint64_t globalCallStackCount = 0;
 
 uint64_t iregister[LLS_IREGISTER_COUNT];
 double fregister[LLS_FREGISTER_COUNT];
@@ -310,7 +312,7 @@ LONG WINAPI TopLevelExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
     if (recentValues[i].pLocation == NULL)
       continue;
 
-    PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, g_pState->pStack, g_pState->pCode);
+    PrintVariableInfo(recentValues[i].pLocation, recentValues[i].globalCallStackCount, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, g_pState->pStack, g_pState->pCode);
 
     recentValues[i].age++;
     recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -397,6 +399,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   bool hasFilter = false;
   char filter[255];
   uint64_t breakpoint = (uint64_t)-1;
+  uint64_t callStackCount = 0;
+  bool breakOnFilterMatch = false;
 
   stdOutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -405,7 +409,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
   SetConsoleColour(CC_DarkGray, CC_Black);
 
-  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
+  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'o' clear recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t'W' break on a value filter match (only available with debug info)\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
 
   ResetConsoleColour();
 #endif
@@ -557,7 +561,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           if (recentValues[i].pLocation == NULL)
             continue;
 
-          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          PrintVariableInfo(recentValues[i].pLocation, recentValues[i].globalCallStackCount, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
           recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -608,6 +612,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         case 'f':
           stepOut = true;
           stepInstructions = false;
+          callStackCount = 0;
           goto continue_execution;
 
         case 'b':
@@ -831,7 +836,20 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (recentValues[i].pLocation == NULL)
               continue;
 
-            PrintVariableInfo(recentValues[i].pLocation, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+            PrintVariableInfo(recentValues[i].pLocation, recentValues[i].globalCallStackCount, recentValues[i].lastDisplayAge != recentValues[i].age, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          }
+
+          break;
+        }
+
+        case 'o':
+        {
+          for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
+          {
+            if (recentValues[i].pLocation == NULL || recentValues[i].highlighted)
+              continue;
+
+            recentValues[i].pLocation = NULL;
           }
 
           break;
@@ -839,22 +857,42 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
         case 'w':
         {
-          puts("filter?");
-
-          hasFilter = fgets(filter, sizeof(filter), stdin);
-
           if (hasFilter)
           {
-            for (size_t i = 0; i < sizeof(filter); i++)
-              if (filter[i] == '\n' || filter[i] == '\r')
-                filter[i] = '\0';
-
-            printf("\nfilter set to '%s'.\n", filter);
+            hasFilter = false;
+            puts("Value Filter has been disabled.");
           }
           else
           {
-            puts("Failed to read from stdin.");
+            puts("filter?");
+
+            hasFilter = fgets(filter, sizeof(filter), stdin);
+
+            if (hasFilter)
+            {
+              for (size_t i = 0; i < sizeof(filter); i++)
+                if (filter[i] == '\n' || filter[i] == '\r')
+                  filter[i] = '\0';
+
+              printf("\nfilter set to '%s'.\n", filter);
+            }
+            else
+            {
+              puts("Failed to read from stdin.");
+            }
+
+            fflush(stdin);
           }
+
+          break;
+        }
+
+        case 'W':
+        {
+          breakOnFilterMatch = !breakOnFilterMatch;
+
+          fputs("Breaking on Filter Match: ", stdout);
+          puts(breakOnFilterMatch ? "On" : "Off");
 
           break;
         }
@@ -1487,6 +1525,72 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       break;
     }
 
+    case LLS_OP_DIVI_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_DIVI_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      if (target_register < LLS_IREGISTER_COUNT)
+      {
+        const int64_t imm = *(int64_t *)pCodePtr;
+        pCodePtr += sizeof(int64_t);
+
+        LOG_I64(imm);
+
+        *(int64_t *)(&iregister[target_register]) /= imm;
+      }
+      else IF_LAST_OPT(target_register < LLS_IREGISTER_COUNT + LLS_FREGISTER_COUNT)
+      {
+        const double imm = *(double *)pCodePtr;
+        pCodePtr += sizeof(double);
+
+        LOG_F64(imm);
+
+        fregister[target_register - LLS_IREGISTER_COUNT] /= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_DIVI_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_DIVI_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      if (source_register < LLS_IREGISTER_COUNT)
+      {
+        ASSERT(operand_register < LLS_IREGISTER_COUNT);
+        iregister[source_register] /= iregister[operand_register];
+      }
+      else IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT + LLS_FREGISTER_COUNT)
+      {
+        ASSERT(operand_register >= LLS_IREGISTER_COUNT && operand_register < LLS_IREGISTER_COUNT + LLS_FREGISTER_COUNT);
+        fregister[source_register - LLS_IREGISTER_COUNT] /= fregister[operand_register - LLS_IREGISTER_COUNT];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
     case LLS_OP_MULU_IMM:
     {
       LOG_INSTRUCTION_NAME(LLS_OP_MULU_IMM);
@@ -1533,6 +1637,162 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         ASSERT(operand_register < LLS_IREGISTER_COUNT);
         iregister[source_register] *= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+    
+    case LLS_OP_DIVU_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_DIVU_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      IF_LAST_OPT(target_register < LLS_IREGISTER_COUNT)
+      {
+        const uint64_t imm = *(uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
+
+        LOG_U64(imm);
+
+        iregister[target_register] /= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_DIVU_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_DIVU_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
+      {
+        ASSERT(operand_register < LLS_IREGISTER_COUNT);
+        iregister[source_register] /= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_MOD_IMM:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOD_IMM);
+
+      const lls_code_t target_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(target_register);
+      LOG_DELIMITER();
+
+      IF_LAST_OPT(target_register < LLS_IREGISTER_COUNT)
+      {
+        const uint64_t imm = *(uint64_t *)pCodePtr;
+        pCodePtr += sizeof(uint64_t);
+
+        LOG_U64(imm);
+
+        iregister[target_register] %= imm;
+      }
+      ASSERT_NO_ELSE;
+
+      LOG_END();
+
+      break;
+    }
+
+    case LLS_OP_MOD_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_MOD_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
+      {
+        ASSERT(operand_register < LLS_IREGISTER_COUNT);
+        iregister[source_register] %= iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_BSL_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_BSL_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
+      {
+        ASSERT(operand_register < LLS_IREGISTER_COUNT);
+        iregister[source_register] = iregister[source_register] << iregister[operand_register];
+      }
+      ASSERT_NO_ELSE;
+
+      break;
+    }
+
+    case LLS_OP_BSR_REGISTER:
+    {
+      LOG_INSTRUCTION_NAME(LLS_OP_BSR_REGISTER);
+
+      const lls_code_t source_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(source_register);
+      LOG_DELIMITER();
+
+      const lls_code_t operand_register = *pCodePtr;
+      pCodePtr++;
+
+      LOG_REGISTER(operand_register);
+      LOG_END();
+
+      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
+      {
+        ASSERT(operand_register < LLS_IREGISTER_COUNT);
+        iregister[source_register] = iregister[source_register] >> iregister[operand_register];
       }
       ASSERT_NO_ELSE;
 
@@ -1689,58 +1949,6 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         ASSERT(operand_register < LLS_IREGISTER_COUNT);
         iregister[source_register] = (iregister[source_register] || iregister[operand_register]) ? 1 : 0;
-      }
-      ASSERT_NO_ELSE;
-
-      break;
-    }
-
-    case LLS_OP_BSL_REGISTER:
-    {
-      LOG_INSTRUCTION_NAME(LLS_OP_BSL_REGISTER);
-
-      const lls_code_t source_register = *pCodePtr;
-      pCodePtr++;
-
-      LOG_REGISTER(source_register);
-      LOG_DELIMITER();
-
-      const lls_code_t operand_register = *pCodePtr;
-      pCodePtr++;
-
-      LOG_REGISTER(operand_register);
-      LOG_END();
-
-      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
-      {
-        ASSERT(operand_register < LLS_IREGISTER_COUNT);
-        iregister[source_register] = iregister[source_register] << iregister[operand_register];
-      }
-      ASSERT_NO_ELSE;
-
-      break;
-    }
-
-    case LLS_OP_BSR_REGISTER:
-    {
-      LOG_INSTRUCTION_NAME(LLS_OP_BSR_REGISTER);
-
-      const lls_code_t source_register = *pCodePtr;
-      pCodePtr++;
-
-      LOG_REGISTER(source_register);
-      LOG_DELIMITER();
-
-      const lls_code_t operand_register = *pCodePtr;
-      pCodePtr++;
-
-      LOG_REGISTER(operand_register);
-      LOG_END();
-
-      IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT)
-      {
-        ASSERT(operand_register < LLS_IREGISTER_COUNT);
-        iregister[source_register] = iregister[source_register] >> iregister[operand_register];
       }
       ASSERT_NO_ELSE;
 
@@ -1973,9 +2181,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       LOG_END();
 
 #ifdef LLS_DEBUG_MODE
-      for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
-        if (recentValues[i].pLocation != NULL && !recentValues[i].pLocation->isStatic)
-          recentValues[i].pLocation = NULL;
+      globalCallStackCount++;
+      callStackCount++;
 #endif
 
       break;
@@ -1997,8 +2204,17 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
       for (size_t i = 0; i < ARRAYSIZE(recentValues); i++)
-        if (recentValues[i].pLocation != NULL && !recentValues[i].pLocation->isStatic)
+        if (recentValues[i].pLocation != NULL && recentValues[i].globalCallStackCount == globalCallStackCount)
           recentValues[i].pLocation = NULL;
+
+      if (callStackCount == 0 && stepOut)
+      {
+        stepOut = false;
+        stepInstructions = true;
+      }
+
+      globalCallStackCount--;
+      callStackCount--;
 #endif
 
       break;
@@ -2344,7 +2560,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             if (recentValues[i].pLocation == NULL)
               continue;
 
-            PrintVariableInfo(recentValues[i].pLocation, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+            PrintVariableInfo(recentValues[i].pLocation, recentValues[i].globalCallStackCount, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
             recentValues[i].age++;
             recentValues[i].lastDisplayAge = recentValues[i].age;
@@ -2359,7 +2575,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             continue;
 
           if (recentValues[i].highlighted)
-            PrintVariableInfo(recentValues[i].pLocation, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+            PrintVariableInfo(recentValues[i].pLocation, recentValues[i].globalCallStackCount, false, recentValues[i].highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
 
           recentValues[i].age++;
         }
@@ -2382,7 +2598,19 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           bool highlighted = hasFilter && strstr(pVariableInfo->name, filter);
           const bool storeValue = highlighted || (pVariableInfo->isVariable && !pVariableInfo->isConst);
 
-          PrintVariableInfo(pVariableInfo, true, highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+          PrintVariableInfo(pVariableInfo, globalCallStackCount, true, highlighted, pStack, iregister, fregister, pState->pStack, pState->pCode);
+
+          if (highlighted && breakOnFilterMatch && !stepInstructions)
+          {
+            stepInstructions = true;
+
+            fflush(stdout);
+            SetConsoleColour(CC_Black, CC_DarkGray);
+            fputs("Value matched the filter.", stdout);
+            fflush(stdout);
+            ResetConsoleColour();
+            puts("");
+          }
 
           if (storeValue)
           {
@@ -2428,6 +2656,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               recentValues[replaceIndex].pLocation = pVariableInfo;
               recentValues[replaceIndex].age = 0;
               recentValues[replaceIndex].highlighted = highlighted;
+              recentValues[replaceIndex].globalCallStackCount = globalCallStackCount;
               recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
             }
           }
@@ -2676,15 +2905,18 @@ uint8_t llshost_from_state(llshost_state_t *pState)
 
 #ifdef LLS_DEBUG_MODE
 
-void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewReference, bool isHighlighted, const uint8_t *_pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
+void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, const uint64_t callStackPos, const bool isNewReference, const bool isHighlighted, const uint8_t *_pStack, const uint64_t *pIRegister, const double *pFRegister, const uint8_t *pStackBase, const uint8_t *pCodeBase)
 {
+  if (!pVariableInfo->isStatic && callStackPos != globalCallStackCount)
+    return;
+
   fflush(stdout);
   SetConsoleColour(isHighlighted ? CC_Black : (isNewReference ? CC_BrightCyan : CC_BrightBlue), isHighlighted ? CC_DarkGray : CC_Black);
 
   fputs(pVariableInfo->name, stdout);
 
   fflush(stdout);
-  SetConsoleColour(isHighlighted ? CC_DarkRed : (isNewReference ? CC_DarkCyan : CC_DarkBlue), CC_Black);
+  SetConsoleColour(isHighlighted ? CC_DarkRed : (callStackPos != globalCallStackCount ? CC_DarkGray : (isNewReference ? CC_DarkCyan : CC_DarkBlue)), CC_Black);
 
   const void *pLocation = NULL;
 
@@ -2841,6 +3073,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu8 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
+        printf("0x%" PRIX8 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -2859,6 +3096,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("%" PRIi8 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
+        printf("0x%" PRIX8 ", ", pValue[i]);
 
       fputs("...\n --> \"", stdout);
 
@@ -2899,6 +3141,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu16 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
+        printf("0x%" PRIX16 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -2917,6 +3164,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
         printf("%" PRIi16 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int16_t); i++)
+        printf("0x%" PRIX16 ", ", pValue[i]);
 
       puts("...");
     }
@@ -2959,6 +3211,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIi32 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
+        printf("0x%" PRIX32 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -2979,6 +3236,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu64 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
+        printf("0x%" PRIX64 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -2997,6 +3259,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("%" PRIi64 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
+        printf("0x%" PRIX64 ", ", pValue[i]);
 
       puts("...");
     }
@@ -3097,6 +3364,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu8 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint8_t); i++)
+        printf("0x%" PRIX8 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -3115,6 +3387,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
         printf("%" PRIi8 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int8_t); i++)
+        printf("0x%" PRIX8 ", ", pValue[i]);
 
       fputs("...\n --> \"", stdout);
 
@@ -3153,6 +3430,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
         printf("%" PRIu16 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint16_t); i++)
+        printf("0x%" PRIX16 ", ", pValue[i]);
 
       puts("...");
     }
@@ -3195,6 +3477,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu32 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint32_t); i++)
+        printf("0x%" PRIX32 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -3213,6 +3500,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
         printf("%" PRIi32 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int32_t); i++)
+        printf("0x%" PRIX32 ", ", pValue[i]);
 
       puts("...");
     }
@@ -3235,6 +3527,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
         printf("%" PRIu64 ", ", pValue[i]);
 
       puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(uint64_t); i++)
+        printf("0x%" PRIX64 ", ", pValue[i]);
+
+      puts("...");
     }
 
     break;
@@ -3253,6 +3550,11 @@ void PrintVariableInfo(DebugDatabaseVariableLocation *pVariableInfo, bool isNewR
     {
       for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
         printf("%" PRIi64 ", ", pValue[i]);
+
+      puts("...");
+
+      for (size_t i = 0; i < 24 / sizeof(int64_t); i++)
+        printf("0x%" PRIX64 ", ", pValue[i]);
 
       puts("...");
     }

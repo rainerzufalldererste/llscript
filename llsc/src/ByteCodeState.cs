@@ -376,7 +376,7 @@ namespace llsc
         if (!value.hasHomePosition && value.hasPosition && value.position.type == PositionType.OnStack)
           throw new Exception("How is this value on the stack?!");
 
-        bool storeInCodeBase = value.type.isConst || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst) || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable);
+        bool storeInCodeBase = (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable);
         bool storeOnGlobalStack = !storeInCodeBase && value.isStatic;
 
         if (storeInCodeBase || storeOnGlobalStack)

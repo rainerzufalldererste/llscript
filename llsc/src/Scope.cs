@@ -8,7 +8,7 @@ namespace llsc
     public SharedValue<long> maxRequiredStackSpace = new SharedValue<long>(0);
 
     public readonly Scope parentScope;
-    public readonly bool isFunction;
+    private readonly bool isFunction;
     public readonly CFunction self;
     public int stackSpaceAllocationByteCodeIndex;
     public bool isConditional = false;
@@ -116,6 +116,29 @@ namespace llsc
       }
 
       return null;
+    }
+
+    public bool IsFunction() => isFunction;
+
+    public bool InFunction()
+    {
+      var parent = parentScope;
+      bool inFunction = isFunction;
+
+      if (inFunction)
+        return true;
+
+      while (parent != null)
+      {
+        inFunction |= parent.isFunction;
+
+        if (inFunction)
+          return true;
+
+        parent = parent.parentScope;
+      }
+
+      return false;
     }
 
     public IEnumerable<CFunction> GetLocalFunctions()

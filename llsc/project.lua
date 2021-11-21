@@ -1,4 +1,4 @@
-  ProjectName = "llsc"
+ProjectName = "llsc"
 project(ProjectName)
 
   --Settings

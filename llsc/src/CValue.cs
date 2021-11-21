@@ -66,6 +66,11 @@ namespace llsc
 
       return ret;
     }
+
+    public static bool IsPowerOfTwo(ulong x)
+    {
+      return (x != 0) && ((x & (x - 1)) == 0);
+    }
   }
 
   public class CConstIntValue : CValue

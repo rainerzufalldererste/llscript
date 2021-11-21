@@ -51,17 +51,17 @@ function void Print(u8 byte)
 }
 
 array<u32, 8> copy;
-u64 remainingSize = sizeof(indices);
+u64 remainingSize = countof(indices);
 u64 offset = 0;
 
-while (remainingSize >= 0)
+while (remainingSize > 0)
 {
   u64 sizeToCopy = 8;
 
   if (remainingSize < 8)
     sizeToCopy = remainingSize;
 
-  memcpy(cast<ptr<u8>>(copy), cast<ptr<u8>>(indices + offset), sizeToCopy);
+  memcpy(cast<ptr<u8>>(copy), cast<ptr<u8>>(indices + offset), sizeToCopy * sizeof(u32));
 
   array<u8, 4> out;
 
@@ -69,15 +69,18 @@ while (remainingSize >= 0)
 
   while (i < sizeToCopy / 2)
   {
-    out[i] = cast<u8>(copy[i * 2] #<# 8) | cast<u8>(copy[i * 2 + 1]);
+    out[i] = cast<u8>(copy[i * 2] #<# 4) | cast<u8>(copy[i * 2 + 1]);
     i++;
   }
 
   i = 0;
 
-  while (i <= countof(out))
+  while (i < countof(out))
   {
     Print(out[i]);
     i++;
   }
+
+  remainingSize = remainingSize - sizeToCopy;
+  offset = offset + sizeToCopy;
 }

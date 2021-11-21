@@ -46,6 +46,9 @@ int32_t main(const int32_t argc, const char **pArgv)
     pByteCode = (uint8_t *)VirtualAlloc((void *)0x7FF50BC00000ULL, (fileSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
 
     if (pByteCode == NULL)
+      pByteCode = (uint8_t *)malloc(fileSize);
+
+    if (pByteCode == NULL)
     {
       fputs("Memory Allocation Failure (ByteCode).", stderr);
       return -1;
@@ -83,6 +86,9 @@ int32_t main(const int32_t argc, const char **pArgv)
     pDebugDatabase = (uint8_t *)VirtualAlloc((void *)0x7FF50DB00000ULL, (fileSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
 
     if (pDebugDatabase == NULL)
+      pDebugDatabase = malloc(fileSize);
+
+    if (pDebugDatabase == NULL)
     {
       fputs("Memory Allocation Failure (DebugInfo).", stderr);
       return -1;
@@ -103,6 +109,9 @@ int32_t main(const int32_t argc, const char **pArgv)
   state.pCode = pByteCode;
   state.stackSize = LLS_DEFUALT_STACK_SIZE;
   state.pStack = (uint8_t *)VirtualAlloc((void *)0x7FF505700000ULL, (state.stackSize + 1023) & ~(size_t)(1024), MEM_COMMIT, PAGE_READWRITE);
+
+  if (state.pStack == NULL)
+    state.pStack = malloc(state.stackSize);
 
   if (state.pStack == NULL)
   {

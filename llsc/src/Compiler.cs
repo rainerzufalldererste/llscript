@@ -751,7 +751,7 @@ namespace llsc
 
     private static void CompileScope(Scope scope, List<Node> nodes, ref ByteCodeState byteCodeState)
     {
-      if (scope.isFunction)
+      if (scope.IsFunction())
       {
         scope.maxRequiredStackSpace = scope.self.minStackSize;
 
@@ -1263,7 +1263,7 @@ namespace llsc
 
             if (lvalue.type is PtrCType)
             {
-              scope.instructions.Add(new CInstruction_AddImm(lvalue, (operatorNode.operatorType == "++" ? 1 : -1) * (lvalue.type as PtrCType).pointsTo.GetSize(), scope.maxRequiredStackSpace, true, out resultingValue, operatorNode.file, operatorNode.line));
+              scope.instructions.Add(new CInstruction_AddImm(lvalue, (operatorNode.operatorType == "++" ? 1 : -1), scope.maxRequiredStackSpace, true, out resultingValue, operatorNode.file, operatorNode.line));
             }
             else
             {
@@ -1404,7 +1404,7 @@ namespace llsc
         }
       }
 
-      if (scope.isFunction)
+      if (scope.IsFunction())
       {
         scope.instructions.Add(new CInstruction_EndFunction(scope.self));
       }
@@ -1489,7 +1489,7 @@ namespace llsc
       var startNode = nodes[0] as NType;
       var arrayType = startNode.type as ArrayCType;
       var builtinType = arrayType.type as BuiltInCType;
-      bool isStatic = isConst || scope.parentScope == null;
+      bool isStatic = isConst || !scope.InFunction();
 
       nodes.RemoveRange(0, 4);
 
@@ -1564,7 +1564,7 @@ namespace llsc
         Error($"Invalid Type '{(nodes[2] as NType).type.ToString()}'. Dynamically Sized Arrays can only contain builtin types.", nodes[2].file, nodes[2].line);
 
       var builtinType = (nodes[2] as NType).type as BuiltInCType;
-      bool isStatic = isConst || scope.parentScope == null;
+      bool isStatic = isConst || !scope.InFunction();
 
       if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
       {
@@ -1658,7 +1658,7 @@ namespace llsc
         var ctype = type.type.MakeCastableClone(type.type);
         ctype.explicitCast = null;
 
-        var value = new CNamedValue(name, ctype, false) { isStatic = scope.parentScope == null };
+        var value = new CNamedValue(name, ctype, false) { isStatic = !scope.InFunction() };
 
         scope.AddVariable(value);
 
@@ -1676,7 +1676,7 @@ namespace llsc
         ctype.explicitCast = null;
         ctype.isConst = true;
 
-        var value = new CNamedValue(name, ctype, false) { isStatic = true };
+        var value = new CNamedValue(name, ctype, false) { isStatic = !scope.InFunction() };
 
         scope.AddVariable(value);
 
@@ -1692,7 +1692,7 @@ namespace llsc
         type.explicitCast = null;
 
         var name = nodes[1] as NName;
-        var value = new CNamedValue(name, type, false) { isStatic = scope.parentScope == null };
+        var value = new CNamedValue(name, type, false) { isStatic = !scope.InFunction() };
 
         scope.AddVariable(value);
 
@@ -1709,7 +1709,7 @@ namespace llsc
         type.isConst = true;
 
         var name = nodes[2] as NName;
-        var value = new CNamedValue(name, type, false) { isStatic = true };
+        var value = new CNamedValue(name, type, false) { isStatic = !scope.InFunction() };
 
         scope.AddVariable(value);
 
@@ -1869,6 +1869,20 @@ namespace llsc
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "==", "<=", "!=", ">=" }.Contains((n as NOperator).operatorType));
 
       if (nextOperator == -1)
+      {
+        bool lastWasCastOrType = false;
+
+        nextOperator = nodes.FindNextSameScope(n =>
+        {
+          bool ret = !lastWasCastOrType && n is NOperator && new string[] { "<", ">" }.Contains((n as NOperator).operatorType);
+
+          lastWasCastOrType = !lastWasCastOrType && (n is NCastKeyword || n is NType || (n is NOperator && ((n as NOperator).operatorType == "<" || (n as NOperator).operatorType == ">")));
+
+          return ret;
+        });
+      }
+
+      if (nextOperator == -1)
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "~", "!" }.Contains((n as NOperator).operatorType));
 
       if (nextOperator == -1)
@@ -1879,20 +1893,6 @@ namespace llsc
 
       if (nextOperator == -1)
         nextOperator = nodes.FindNextSameScope(n => n is NOperator && new string[] { "*", "/", "%", "&", "^" }.Contains((n as NOperator).operatorType));
-
-      if (nextOperator == -1)
-      {
-        bool lastWasCastOrType = false;
-
-        nextOperator = nodes.FindNextSameScope(n => 
-          {
-            bool ret = !lastWasCastOrType && n is NOperator && new string[] { "<", ">" }.Contains((n as NOperator).operatorType);
-
-            lastWasCastOrType = !lastWasCastOrType && (n is NCastKeyword || n is NType);
-
-            return ret;
-          });
-      }
 
       if (nextOperator != -1)
       {

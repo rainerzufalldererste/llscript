@@ -83,14 +83,11 @@ namespace llsc
       for (int i = 0; i < byteCodeState.registers.Length; i++)
         byteCodeState.registers[i] = null;
 
-      foreach (var parameter in function.parameters)
-        if (parameter.value.position.type == PositionType.InRegister)
-          byteCodeState.registers[parameter.value.position.registerIndex] = parameter.value;
-
-      foreach (var param in function.parameters)
-        byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(param.value, function.minStackSize, byteCodeState));
-
       byteCodeState.instructions.Add(new LLI_StackIncrementImm(function.minStackSize, 0));
+
+      foreach (var parameter in function.parameters)
+        byteCodeState.MarkValueAsPosition(parameter.value, parameter.value.position, function.minStackSize, false);
+
       byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(new CValue(file, line, new PtrCType(VoidCType.Instance), true) { description = $"Instruction pointer of the calling function", hasPosition = true, position = Position.StackOffset(0) }, function.minStackSize, byteCodeState));
     }
   }
@@ -443,11 +440,11 @@ namespace llsc
 
       if (size <= 8)
       {
-        int sourceValueRegister = byteCodeState.CopyValueToAnyRegister(sourceValue, stackSize);
+        int sourceValueRegister = byteCodeState.MoveValueToAnyRegister(sourceValue, stackSize);
 
         using (var lockedRegister = byteCodeState.LockRegister(sourceValueRegister))
         {
-          int targetPtrRegister = byteCodeState.CopyValueToAnyRegister(targetValuePtr, stackSize);
+          int targetPtrRegister = byteCodeState.MoveValueToAnyRegister(targetValuePtr, stackSize);
 
           if (size < 8)
             byteCodeState.instructions.Add(new LLI_MovRegisterToPtrInRegister_NBytes(targetPtrRegister, sourceValueRegister, (byte)size));
@@ -836,7 +833,7 @@ namespace llsc
 
       if (!value.hasPosition)
       {
-        if (value.type.isConst || (value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.type is PtrCType && (value.type as PtrCType).pointsTo.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable))
+        if ((value.type is ArrayCType && (value.type as ArrayCType).type.isConst) || (value.isStatic && Compiler.Assumptions.ByteCodeMutable))
         {
           value.position = Position.CodeBaseOffset(value, new byte[value.type.GetSize()], file, line);
           byteCodeState.postInstructionDataStorage.Add(value.position.codeBaseOffset);
@@ -1000,19 +997,9 @@ namespace llsc
       else
         byteCodeState.DumpValue(source);
 
-
-      if (!(source is CNamedValue))
-      {
-        source.hasPosition = false;
-        source.position.type = PositionType.Invalid;
-      }
-
-      byteCodeState.MarkValueAsPosition(target, originalPosition, stackSize, true);
-
       source.remainingReferences--;
 
-      if (target.position.type == PositionType.InRegister)
-        byteCodeState.registers[target.position.registerIndex] = target;
+      byteCodeState.MarkValueAsPosition(target, originalPosition, stackSize, true);
     }
 
     public override string ToString()
@@ -1332,6 +1319,10 @@ namespace llsc
 
           byteCodeState.instructions.Add(new LLI_MultiplySignedImm(rightRegisterIndex, BitConverter.GetBytes((left.type as PtrCType).pointsTo.GetSize())));
         }
+        else if (left is CNamedValue)
+        {
+          rightRegisterIndex = byteCodeState.CopyValueToAnyRegister(right, stackSize);
+        }
         else
         {
           rightRegisterIndex = byteCodeState.MoveValueToAnyRegister(right, stackSize);
@@ -1412,30 +1403,75 @@ namespace llsc
       if (!right.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized right value {right}.", file, line);
 
+      bool isNop = (right is CConstIntValue && ((right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).uvalue == 1) || (!(right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).ivalue == 1)) || (right is CConstFloatValue && (right as CConstFloatValue).value == 1.0);
+
+      if (isNop)
+      {
+        left.remainingReferences--;
+        right.remainingReferences--;
+        return;
+      }
+
+      bool isWrite = (right is CConstIntValue && (((right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).uvalue == 0) || (!(right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).ivalue == 0))) || (right is CConstFloatValue && ((right as CConstFloatValue).value == 0 || double.IsNaN((right as CConstFloatValue).value)));
+
       bool leftIsMutableValue = !(left is CNamedValue);
-      int leftRegisterIndex = leftIsMutableValue || toSelf ? byteCodeState.MoveValueToAnyRegister(left, stackSize) : byteCodeState.CopyValueToAnyRegister(left, stackSize);
+      int leftRegisterIndex = 0;
+
+      if (isWrite)
+      {
+        if ((leftIsMutableValue || toSelf) && left.position.type == PositionType.InRegister)
+          leftRegisterIndex = left.position.registerIndex;
+        else
+          leftRegisterIndex = (left.type as BuiltInCType).IsFloat() ? byteCodeState.GetFreeFloatRegister(stackSize) : byteCodeState.GetFreeIntegerRegister(stackSize);
+      }
+      else
+      {
+        leftRegisterIndex = leftIsMutableValue || toSelf ? byteCodeState.MoveValueToAnyRegister(left, stackSize) : byteCodeState.CopyValueToAnyRegister(left, stackSize);
+      }
 
       using (var registerLock = byteCodeState.LockRegister(leftRegisterIndex))
       {
-        if (!toSelf && (left is CNamedValue || left is CGlobalValueReference))
-        {
-          if (left is CNamedValue)
-            byteCodeState.MoveValueToHome(left as CNamedValue, stackSize);
-          else if (left is CGlobalValueReference)
-            throw new NotImplementedException();
-        }
-
         // lvalue can't be imm if rvalue is const, values would've been swapped by the constructor.
         if (right is CConstIntValue)
         {
           if ((left.type is BuiltInCType && !(left.type as BuiltInCType).IsUnsigned()) || (right.type is BuiltInCType && !(right.type as BuiltInCType).IsUnsigned()))
-            byteCodeState.instructions.Add(new LLI_MultiplySignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstIntValue).uvalue)));
+          {
+            var rimm = right as CConstIntValue;
+
+            if (rimm.ivalue == 0)
+              byteCodeState.instructions.Add(new LLI_MovImmToRegister(leftRegisterIndex, new byte[8]));
+            else if (rimm.ivalue == 1)
+            { }
+            else
+              byteCodeState.instructions.Add(new LLI_MultiplySignedImm(leftRegisterIndex, BitConverter.GetBytes(rimm.uvalue)));
+          }
           else
-            byteCodeState.instructions.Add(new LLI_MultiplyUnsignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstIntValue).uvalue)));
+          {
+            var rimm = right as CConstIntValue;
+
+            if (rimm.uvalue == 0)
+              byteCodeState.instructions.Add(new LLI_MovImmToRegister(leftRegisterIndex, new byte[8]));
+            else if (rimm.uvalue == 1)
+            { }  
+            else
+              byteCodeState.instructions.Add(new LLI_MultiplyUnsignedImm(leftRegisterIndex, BitConverter.GetBytes(rimm.uvalue)));
+          }
         }
         else if (right is CConstFloatValue)
         {
-          byteCodeState.instructions.Add(new LLI_MultiplySignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstFloatValue).value)));
+          var rimm = right as CConstFloatValue;
+
+          if (rimm.value == 0)
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(leftRegisterIndex, new byte[8]));
+          else if (double.IsNaN(rimm.value))
+          {
+            Compiler.Warn($"Multiplying {left} with {right}, which is NaN.", file, line);
+            byteCodeState.instructions.Add(new LLI_MovImmToRegister(leftRegisterIndex, BitConverter.GetBytes(rimm.value)));
+          }
+          else if (rimm.value == 1.0)
+          { }
+          else
+            byteCodeState.instructions.Add(new LLI_MultiplySignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstFloatValue).value)));
         }
         else
         {
@@ -1503,8 +1539,17 @@ namespace llsc
       if (!left.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized left value {left}.", file, line);
 
-      if (!left.isInitialized)
+      if (!right.isInitialized)
         Compiler.Error($"Cannot perform operator on uninitialized right value {right}.", file, line);
+
+      bool isNop = (right is CConstIntValue && ((right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).uvalue == 1) || (!(right.type as BuiltInCType).IsUnsigned() && (right as CConstIntValue).ivalue == 1)) || (right is CConstFloatValue && (right as CConstFloatValue).value == 1.0);
+
+      if (isNop)
+      {
+        left.remainingReferences--;
+        right.remainingReferences--;
+        return;
+      }
 
       bool leftIsMutableValue = !(left is CNamedValue);
       int leftRegisterIndex = leftIsMutableValue || toSelf ? byteCodeState.MoveValueToAnyRegister(left, stackSize) : byteCodeState.CopyValueToAnyRegister(left, stackSize);
@@ -1521,14 +1566,28 @@ namespace llsc
 
         if (right is CConstIntValue)
         {
+          var rimm = right as CConstIntValue;
+
           if ((left.type is BuiltInCType && !(left.type as BuiltInCType).IsUnsigned()) || (right.type is BuiltInCType && !(right.type as BuiltInCType).IsUnsigned()))
-            byteCodeState.instructions.Add(new LLI_DivideSignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstIntValue).uvalue)));
+          {
+            if (rimm.ivalue == 0)
+              Compiler.Error($"Attempting to divide {left} by zero ({right}).", file, line);
+
+            byteCodeState.instructions.Add(new LLI_DivideSignedImm(leftRegisterIndex, BitConverter.GetBytes(rimm.ivalue)));
+          }
           else
-            byteCodeState.instructions.Add(new LLI_DivideUnsignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstIntValue).uvalue)));
+          {
+            if (rimm.uvalue == 0)
+              Compiler.Error($"Attempting to divide {left} by zero ({right}).", file, line);
+
+            byteCodeState.instructions.Add(new LLI_DivideUnsignedImm(leftRegisterIndex, BitConverter.GetBytes(rimm.uvalue)));
+          }
         }
         else if (right is CConstFloatValue)
         {
-          byteCodeState.instructions.Add(new LLI_DivideSignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstFloatValue).value)));
+          // Multiplying should be faster than dividing.
+          //byteCodeState.instructions.Add(new LLI_DivideSignedImm(leftRegisterIndex, BitConverter.GetBytes((right as CConstFloatValue).value)));
+          byteCodeState.instructions.Add(new LLI_MultiplySignedImm(leftRegisterIndex, BitConverter.GetBytes(1.0 / (right as CConstFloatValue).value)));
         }
         else
         {
