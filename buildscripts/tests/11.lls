@@ -23,6 +23,24 @@ array<u32, 255> piln = {
   28, 194, 160, 136, 135, 110, 148, 104, 97, 250, 66, 196, 76, 195, 248, 117, 39, 19, 241, 247, 254, 27, 62, 33, 5, 89, 85, 128, 221, 185, 29, 239, 177, 36, 114, 170, 125, 201, 202, 17, 142, 198, 228, 77, 165, 133, 224, 223, 138, 78, 219, 112, 49, 9, 183, 174, 214, 52, 218, 151, 59, 129, 111, 15, 6, 237, 92, 65, 182, 23, 178, 244, 131, 102, 226, 124, 227, 31, 200, 190, 252, 121, 139, 126, 209, 164, 143, 70, 162, 175, 215, 24, 225, 144, 123, 54, 229, 26, 98, 87, 166, 95, 21, 74, 14, 82, 222, 105, 2, 99, 60, 68, 186, 8, 73, 169, 118, 134, 42, 84, 152, 4, 0, 206, 94, 155, 149, 172, 13, 101, 204, 234, 212, 246, 197, 47, 184, 93, 10, 50, 81, 243, 140, 72, 61, 83, 91, 179, 63, 75, 233, 232, 211, 146, 12, 20, 96, 55, 16, 187, 193, 108, 242, 53, 181, 122, 171, 132, 240, 238, 80, 188, 176, 34, 44, 103, 230, 88, 220, 37, 192, 32, 120, 231, 153, 67, 137, 207, 46, 154, 116, 71, 235, 38, 43, 40, 35, 30, 48, 158, 18, 51, 127, 56, 119, 90, 159, 41, 11, 115, 57, 147, 130, 145, 205, 191, 161, 25, 216, 156, 113, 79, 22, 249, 253, 189, 69, 199, 106, 3, 157, 208, 173, 150, 167, 58, 100, 107, 109, 45, 213, 245, 1, 251, 64, 236, 203, 163, 180, 217, 168, 7, 86, 141, 210
 };
 
+text kernel32dll = "Kernel32.dll";
+text writeFileA = "WriteFile";
+
+voidptr kernel32dll_handle = load_library(kernel32dll);
+voidptr writeFileAAddr = get_proc_address(kernel32dll_handle, writeFileA);
+
+extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)> writeFileAFunc = cast<extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)>>(writeFileAAddr);
+
+text getStdHandle = "GetStdHandle";
+voidptr getStdHandleAddr = get_proc_address(kernel32dll_handle, getStdHandle);
+extern_func<voidptr (u32)> getStdHandleFunc = cast<extern_func<voidptr (u32)>>(getStdHandleAddr);
+
+u32 STD_OUTPUT_HANDLE = cast<u32>(-11);
+voidptr stdOutHandle = getStdHandleFunc(STD_OUTPUT_HANDLE);
+
+text outlut = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF";
+u32 _unused;
+
 u64 i = 0;
 
 //////////////////////////////////////////////////////////////////////
@@ -73,91 +91,45 @@ while (remainingSize >= 1)
   //////////////////////////////////////////////////////////////////////
   u64 r = 0;
 
-  while (r <= 1)
-  {
-    //////////////////////////////////////////////////////////////////////
-    i = 0;
-
-    while (i <= 15)
-    {
-      valueof(addressof(bc[i])) = pSeed[i] ^ pSeed[i + 16] ^ pSeed[i + 32] ^ pSeed[i + 48] ^ pSeed[i + 64] ^ pSeed[i + 80] ^ pSeed[i + 96] ^ pSeed[i + 112] ^ pSeed[i + 128] ^ pSeed[i + 144] ^ pSeed[i + 160] ^ pSeed[i + 176] ^ pSeed[i + 192] ^ pSeed[i + 208] ^ pSeed[i + 224] ^ pSeed[i + 240];
-      i++;
-    }
-    //////////////////////////////////////////////////////////////////////
-
     u64 j = 0;
-
-    //////////////////////////////////////////////////////////////////////
-    i = 0;
-
-    while (i <= 15)
-    {
-      u64 rot_l_base = bc[(i + 1) & 15];
-
-      t = bc[(i + 15) & 15] ^ ((rot_l_base #<# 1) | (rot_l_base #># 63));
-      
-      //////////////////////////////////////////////////////////////////////
-      j = 0;
-
-      while (j <= 255)
-      {
-        valueof(addressof(pSeed[j + i])) = pSeed[j + i] ^ t;
-        j = j + 16;
-      }
-      //////////////////////////////////////////////////////////////////////
-       
-      i++;
-    }
-    //////////////////////////////////////////////////////////////////////
 
     t = pSeed[1];
     
     //////////////////////////////////////////////////////////////////////
     i = 0;
     
-    while (i <= 254)
+    while (i <= 3)
     {
       j = piln[i];
-      valueof(addressof(bc[0])) = pSeed[j];
-      valueof(addressof(pSeed[j])) = (t #<# rotc[i]) | (t #># (64 - rotc[i]));
+
+      u64 XxXxX = t;
+      u64 kk = 0;
+
+      while (kk < 8)
+      {
+        writeFileAFunc(stdOutHandle, outlut + ((XxXxX & 0xFF) * 2), 2, addressof(_unused), null);
+
+        XxXxX = XxXxX #># 8;
+        kk++;
+      }
+
+      bc[0] = pSeed[j];
+      pSeed[j] = (t #<# rotc[i]) | (t #># (64 - rotc[i]));
       t = bc[0];
+
+      XxXxX = t;
+      kk = 0;
+
+      while (kk < 8)
+      {
+        writeFileAFunc(stdOutHandle, outlut + ((XxXxX & 0xFF) * 2), 2, addressof(_unused), null);
+
+        XxXxX = XxXxX #># 8;
+        kk++;
+      }
 
       i++;
     }
-    //////////////////////////////////////////////////////////////////////
-
-    //////////////////////////////////////////////////////////////////////
-    j = 0;
-    
-    while (j <= 254)
-    {
-      //////////////////////////////////////////////////////////////////////
-      i = 0;
-
-      while (i <= 15)
-      {
-        valueof(addressof(bc[i])) = pSeed[j + i];
-        i++;
-      }
-      //////////////////////////////////////////////////////////////////////
-      
-      //////////////////////////////////////////////////////////////////////
-      i = 0;
-
-      while (i <= 15)
-      {
-        valueof(addressof(pSeed[j + i])) = pSeed[j + i] ^ ((~(bc[(i + 1) & 15])) & bc[(i + 2) & 15]);
-        i++;
-      }
-      //////////////////////////////////////////////////////////////////////
-
-      j = j + 16;
-    }
-    //////////////////////////////////////////////////////////////////////
-
-    valueof(addressof(pSeed[0])) = pSeed[0] ^ pIV[r];
-    r++;
-  }
   //////////////////////////////////////////////////////////////////////
 
   memcpy(oldData, pBlockOffset, clampedSize);
@@ -184,35 +156,4 @@ while (remainingSize >= 1)
   //////////////////////////////////////////////////////////////////////
 
   pBlockOffset = pBlockOffset + 128;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-text kernel32dll = "Kernel32.dll";
-text writeFileA = "WriteFile";
-
-voidptr kernel32dll_handle = load_library(kernel32dll);
-voidptr writeFileAAddr = get_proc_address(kernel32dll_handle, writeFileA);
-
-extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)> writeFileAFunc = cast<extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)>>(writeFileAAddr);
-
-text getStdHandle = "GetStdHandle";
-voidptr getStdHandleAddr = get_proc_address(kernel32dll_handle, getStdHandle);
-extern_func<voidptr (u32)> getStdHandleFunc = cast<extern_func<voidptr (u32)>>(getStdHandleAddr);
-
-u32 STD_OUTPUT_HANDLE = cast<u32>(-11);
-voidptr stdOutHandle = getStdHandleFunc(STD_OUTPUT_HANDLE);
-
-u64 _index = 0;
-ptr<u8> pResult = cast<ptr<u8>>(__block);
-
-text outlut = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9FA0A1A2A3A4A5A6A7A8A9AAABACADAEAFB0B1B2B3B4B5B6B7B8B9BABBBCBDBEBFC0C1C2C3C4C5C6C7C8C9CACBCCCDCECFD0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFE0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFF0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFF";
-
-u32 _unused;
-
-while (_index < sizeof(__block))
-{
-  writeFileAFunc(stdOutHandle, outlut + (valueof(pResult + _index) * 2), 2, addressof(_unused), null);
-
-  _index++;
 }

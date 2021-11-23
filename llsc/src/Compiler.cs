@@ -621,8 +621,42 @@ namespace llsc
     {
       for (int i = nodes.Count - 1; i >= 0; i--)
       {
+        // Const Type.
+        if (nodes.NextIs(i, typeof(NConstKeyword), typeof(NType)))
+        {
+          var typeNode = nodes[i + 1];
+          var type = (typeNode as NType).type;
+
+          if (type is PtrCType)
+          {
+            var t = (type as PtrCType).pointsTo;
+            t = t.MakeCastableClone(t);
+            t.explicitCast = null;
+            t.isConst = true;
+
+            type = new PtrCType(t) { isConst = true };
+          }
+          else if (type is ArrayCType)
+          {
+            var t = (type as ArrayCType).type;
+            t = t.MakeCastableClone(t);
+            t.explicitCast = null;
+            t.isConst = true;
+
+            type = new ArrayCType(t, (type as ArrayCType).count) { isConst = true };
+          }
+          else
+          {
+            type = type.MakeCastableClone(type);
+            type.explicitCast = null;
+            type.isConst = true;
+          }
+
+          nodes.RemoveRange(i, 2);
+          nodes.Insert(i, new NType(type, typeNode.file, typeNode.line));
+        }
         // Ptr.
-        if (nodes.NextIs(i, typeof(NPtrKeyword), typeof(NOperator), typeof(NType), typeof(NOperator)) && ((nodes[i + 1] as NOperator).operatorType == "<" && (nodes[i + 3] as NOperator).operatorType == ">"))
+        else if (nodes.NextIs(i, typeof(NPtrKeyword), typeof(NOperator), typeof(NType), typeof(NOperator)) && ((nodes[i + 1] as NOperator).operatorType == "<" && (nodes[i + 3] as NOperator).operatorType == ">"))
         {
           var start = nodes[i];
           NType type = nodes[i + 2] as NType;
@@ -994,7 +1028,7 @@ namespace llsc
           // Handle Conditional Block.
           {
             var nextElseLabel = new LLI_Label_PseudoInstruction($"First next else label for '{ifNode}' in {ifNode.file}:{ifNode.line + 1}");
-            scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, nextElseLabel, scope.maxRequiredStackSpace, true, ifNode.file, ifNode.line));
+            scope.instructions.Add(new CInstruction_IfZeroJumpToLabel(value, nextElseLabel, scope.maxRequiredStackSpace, true, ifNode.file, ifNode.line));
 
             // Inside If Block.
             {
@@ -1052,7 +1086,7 @@ namespace llsc
               var elseIfConditionValue = GetRValue(scope, elseIfCondition.ToList(), ref byteCodeState);
               nodes.RemoveRange(0, elseIfConditionEndIndex + 1);
 
-              scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(elseIfConditionValue, nextElseLabel, scope.maxRequiredStackSpace, false, ifNode.file, ifNode.line));
+              scope.instructions.Add(new CInstruction_IfZeroJumpToLabel(elseIfConditionValue, nextElseLabel, scope.maxRequiredStackSpace, false, ifNode.file, ifNode.line));
             }
 
             // Inside Else Block.
@@ -1107,7 +1141,7 @@ namespace llsc
           LLI_Label_PseudoInstruction beforeWhileLabel = new LLI_Label_PseudoInstruction($"Before {whileNode} in {whileNode.file}:{whileNode.line + 1}");
           LLI_Label_PseudoInstruction beforeWhileConsecutiveLabel = new LLI_Label_PseudoInstruction($"Before consecutive executions of {whileNode} in {whileNode.file}:{whileNode.line + 1}");
 
-          scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(value, afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
+          scope.instructions.Add(new CInstruction_IfZeroJumpToLabel(value, afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(beforeWhileLabel, whileNode.file, whileNode.line));
 
           // Inside while block.
@@ -1142,7 +1176,7 @@ namespace llsc
           }
 
           scope.instructions.Add(new CInstruction_Label(beforeWhileConsecutiveLabel, whileNode.file, whileNode.line));
-          scope.instructions.Add(new CInstruction_IfNonZeroJumpToLabel(GetRValue(scope, condition.ToList(), ref byteCodeState), afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
+          scope.instructions.Add(new CInstruction_IfZeroJumpToLabel(GetRValue(scope, condition.ToList(), ref byteCodeState), afterWhileLabel, scope.maxRequiredStackSpace, true, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_GotoLabel(beforeWhileLabel, whileNode.file, whileNode.line));
           scope.instructions.Add(new CInstruction_Label(afterWhileLabel, whileNode.file, whileNode.line));
         }
@@ -1150,8 +1184,9 @@ namespace llsc
         {
           var nameNode = nodes[2] as NName;
           var indexNode = nodes[4] as NIntegerValue;
+          var variable = scope.GetVariable(nameNode.name);
           scope.instructions.Add(new CInstruction_CustomAction(b => {
-            b.CopyValueToPosition(scope.GetVariable(nameNode.name), Position.Register((int)indexNode.uint_value), scope.maxRequiredStackSpace);
+            b.CopyValueToPosition(variable, Position.Register((int)indexNode.uint_value), scope.maxRequiredStackSpace, variable.type.GetSize());
           }, nameNode.file, nameNode.line));
           nodes.RemoveRange(0, 7);
         }
@@ -1294,7 +1329,7 @@ namespace llsc
                 rvalue.description += " (rvalue)";
 
               if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
-                Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
+                Error($"Type '{rvalue.type}' is illegal for an rvalue.", paramNodes[0].file, paramNodes[0].line);
 
               var ptrValue = GetRValue(scope, paramNodes, ref byteCodeState);
 
@@ -1302,7 +1337,7 @@ namespace llsc
                 ptrValue.description += " (rvalue)";
 
               if (!(ptrValue.type is PtrCType))
-                Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", rnodes[0].file, rnodes[0].line);
+                Error($"Type '{ptrValue.type}' cannot be used as parameter for 'valueof'.", paramNodes[0].file, paramNodes[0].line);
 
               scope.instructions.Add(new CInstruction_SetValuePtrToValue(ptrValue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
             }
@@ -1337,7 +1372,7 @@ namespace llsc
                 variable = reference;
               }
 
-              var paramNodes = nodes.GetRange(2, firstOperator - 3);
+              var subScriptNodes = nodes.GetRange(2, firstOperator - 3);
               var equalsNode = nodes[firstOperator];
               var rnodes = nodes.GetRange(firstOperator + 1, nextEndLine - (firstOperator + 1));
               nodes.RemoveRange(0, nextEndLine + 1);
@@ -1350,16 +1385,16 @@ namespace llsc
               if (rvalue.type is VoidCType || rvalue.type is ArrayCType)
                 Error($"Type '{rvalue.type}' is illegal for an rvalue.", rnodes[0].file, rnodes[0].line);
 
-              var subScriptValue = GetRValue(scope, paramNodes, ref byteCodeState);
+              var subScriptValue = GetRValue(scope, subScriptNodes, ref byteCodeState);
 
               if (!(subScriptValue is CNamedValue))
                 subScriptValue.description += " (rvalue)";
 
               if (!(subScriptValue.type is BuiltInCType && !(subScriptValue.type as BuiltInCType).IsFloat()))
-                Error($"Type '{subScriptValue}' cannot be used as subscript. Expected an integer type.", rnodes[0].file, rnodes[0].line);
+                Error($"Type '{subScriptValue}' cannot be used as subscript. Expected an integer type.", subScriptNodes[0].file, subScriptNodes[0].line);
 
               CValue lvalue;
-              scope.instructions.Add(new CInstruction_Add(variable, subScriptValue, scope.maxRequiredStackSpace, false, out lvalue, nodes[1].file, nodes[1].line));
+              scope.instructions.Add(new CInstruction_Add(variable, subScriptValue, scope.maxRequiredStackSpace, false, out lvalue, subScriptNodes[0].file, subScriptNodes[0].line));
 
               scope.instructions.Add(new CInstruction_SetValuePtrToValue(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
             }
@@ -1393,8 +1428,6 @@ namespace llsc
                 lvalue.description += " (lvalue)";
 
               scope.instructions.Add(new CInstruction_SetValueTo(lvalue, rvalue, equalsNode.file, equalsNode.line, scope.maxRequiredStackSpace));
-
-              lvalue.isInitialized = true;
             }
           }
           else
@@ -1491,6 +1524,13 @@ namespace llsc
       var builtinType = arrayType.type as BuiltInCType;
       bool isStatic = isConst || !scope.InFunction();
 
+      if (isConst)
+      {
+        builtinType = builtinType.MakeCastableClone(builtinType) as BuiltInCType;
+        builtinType.explicitCast = null;
+        builtinType.isConst = true;
+      }
+
       nodes.RemoveRange(0, 4);
 
       var valueCount = 0;
@@ -1546,10 +1586,7 @@ namespace llsc
         data.AddRange(new byte[arrayType.GetSize() - data.Count]);
 
       if (isConst)
-      {
         arrayType.isConst = true;
-        arrayType.type.isConst = true;
-      }
 
       var value = new CNamedValue(nameNode, arrayType, true);
       value.isStatic = isStatic || isConst;
@@ -1565,6 +1602,13 @@ namespace llsc
 
       var builtinType = (nodes[2] as NType).type as BuiltInCType;
       bool isStatic = isConst || !scope.InFunction();
+
+      if (isConst)
+      {
+        builtinType = builtinType.MakeCastableClone(builtinType) as BuiltInCType;
+        builtinType.explicitCast = null;
+        builtinType.isConst = true;
+      }
 
       if (builtinType.type == BuiltInTypes.i8 && nodes.Count > 6 && nodes[6] is NStringValue && nodes[7] is NLineEnd)
       {
@@ -1630,10 +1674,7 @@ namespace llsc
         var arrayType = new ArrayCType(builtinType, valueCount);
 
         if (isConst)
-        {
           arrayType.isConst = true;
-          arrayType.type.isConst = true;
-        }
 
         var value = new CNamedValue(nameNode, arrayType, true);
         value.isStatic = isStatic || isConst;
@@ -1704,7 +1745,7 @@ namespace llsc
           Error($"Cannot declare const value {nodes[2]}. {nodes[0]} and {nodes[1]} can only be used when assigning a value.", nodes[0].file, nodes[0].line);
 
         var type = (rValueType.explicitCast == null ? rValueType : rValueType.explicitCast);
-        type.MakeCastableClone(type);
+        type = type.MakeCastableClone(type);
         type.explicitCast = null;
         type.isConst = true;
 
@@ -2029,8 +2070,6 @@ namespace llsc
                   Error($"Cannot assign '{right}' to constant value '{left}'.", operatorNode.file, operatorNode.line);
 
                 scope.instructions.Add(new CInstruction_SetValueTo(left, right, operatorNode.file, operatorNode.line, scope.maxRequiredStackSpace));
-
-                right.isInitialized = true;
 
                 return right;
               }
@@ -2531,6 +2570,8 @@ namespace llsc
               else
                 value = new CValue(nodes[1].file, nodes[1].line, BuiltInCType.Types["f64"], true) { description = $"from {nodes[1]}", hasPosition = true, position = Position.Register((int)registerIndexNode.uint_value) };
 
+              value.type = value.type.MakeCastableClone(value.type);
+              value.type.explicitCast = null;
               value.type.isConst = true;
 
               scope.instructions.Add(new CInstruction_CustomAction(e => { e.registers[value.position.registerIndex] = value; }, nodes[1].file, nodes[1].line));
@@ -2569,8 +2610,13 @@ namespace llsc
       else if (nodes[0] is NStringValue && nodes.Count == 1)
       {
         byte[] bytes = (nodes[0] as NStringValue).bytes;
-        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(BuiltInCType.Types["i8"], bytes.LongLength) { isConst = true }, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
-        inlineString.type.isConst = true;
+
+        CType internalType = BuiltInCType.Types["i8"];
+        internalType = internalType.MakeCastableClone(internalType);
+        internalType.explicitCast = null;
+        internalType.isConst = true;
+
+        CValue inlineString = new CValue(nodes[0].file, nodes[0].line, new ArrayCType(internalType, bytes.LongLength) { isConst = true }, true) { description = $"inline string '{(nodes[0] as NStringValue).value}'" };
 
         scope.instructions.Add(new CInstruction_InitializeArray(inlineString, bytes, nodes[0].file, nodes[0].line, scope.maxRequiredStackSpace));
 

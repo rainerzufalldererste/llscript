@@ -5,7 +5,7 @@ namespace llsc
 {
   public class CValue
   {
-    public CType type { get; protected set; }
+    public CType type { get; set; }
 
     public string description = "";
 
@@ -13,7 +13,7 @@ namespace llsc
 
     public int line { get; protected set; }
 
-    public bool isInitialized;
+    public bool isInitialized = false;
     public Position position;
     public bool hasPosition = false;
 
@@ -37,7 +37,7 @@ namespace llsc
       this.isInitialized = isInitialized;
     }
 
-    public override string ToString() => $"unnamed value #{index} [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => $"unnamed value #{index} [" + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
 
     public virtual CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -87,6 +87,9 @@ namespace llsc
     {
       this.uvalue = value;
       unchecked { this.ivalue = (long)value; }
+
+      base.type = base.type.MakeCastableClone(base.type);
+      base.type.explicitCast = null;
       base.type.isConst = true;
     }
 
@@ -136,6 +139,8 @@ namespace llsc
 
       ivalue = value.int_value;
 
+      base.type = base.type.MakeCastableClone(base.type);
+      base.type.explicitCast = null;
       base.type.isConst = true;
     }
 
@@ -188,13 +193,19 @@ namespace llsc
       base.type = _type;
       base.isInitialized = true;
 
+      base.type = base.type.MakeCastableClone(base.type);
+      base.type.explicitCast = null;
       base.type.isConst = true;
 
-      if (this.smallestPossibleSignedType != null)
-        this.smallestPossibleSignedType.isConst = true;
+      if (smallestPossibleSignedType != null)
+      {
+        smallestPossibleSignedType = smallestPossibleSignedType.MakeCastableClone(smallestPossibleSignedType);
+        smallestPossibleSignedType.explicitCast = null;
+        smallestPossibleSignedType.isConst = true;
+      }
     }
 
-    public override string ToString() => "unnamed immediate value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + ((type as BuiltInCType).IsUnsigned() ? uvalue.ToString() : ivalue.ToString()) + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -229,6 +240,9 @@ namespace llsc
     public CConstFloatValue(double value, CType type, string file, int line) : base(file, line, type, true)
     {
       this.value = value;
+
+      base.type = base.type.MakeCastableClone(base.type);
+      base.type.explicitCast = null;
       base.type.isConst = true;
     }
 
@@ -238,10 +252,13 @@ namespace llsc
         Compiler.Error($"Invalid Constant Value. Floating point value cannot be assigned to type '{ type.ToString() }'.", value.file, value.line);
 
       this.value = value.value;
+
+      base.type = base.type.MakeCastableClone(base.type);
+      base.type.explicitCast = null;
       base.type.isConst = true;
     }
 
-    public override string ToString() => "unnamed immediate value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => "unnamed immediate value [" + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + "] (" + value.ToString() + ")" + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -283,7 +300,7 @@ namespace llsc
       this.name = name;
     }
 
-    public override string ToString() => (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
+    public override string ToString() => type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + " " + name + (string.IsNullOrWhiteSpace(description) ? "" : $" ('{description}')");
 
     public override CValue DeepClone(Scope scope, ref ByteCodeState byteCodeState)
     {
@@ -329,7 +346,7 @@ namespace llsc
 
     }
 
-    public override string ToString() => "unnamed global (?) value [" + (type.isConst ? "const " : "") + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
+    public override string ToString() => "unnamed global (?) value [" + type + (type.explicitCast != null ? $" (as '{type.explicitCast}') " : "") + (string.IsNullOrWhiteSpace(description) ? "" : $" '{description}'") + "]";
   }
 
   public class CNullValue : CValue

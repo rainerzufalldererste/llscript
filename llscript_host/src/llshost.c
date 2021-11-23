@@ -402,6 +402,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
   uint64_t callStackCount = 0;
   bool breakOnFilterMatch = false;
   bool breakOnFunction = false;
+  bool silenceComments = false;
 
   stdOutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -410,7 +411,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
   SetConsoleColour(CC_DarkGray, CC_Black);
 
-  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'o' clear recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t'W' break on a value filter match (only available with debug info)\n\t'F' continue to next function call/return\n\t's' toggle silent\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
+  puts("llshost byte code interpreter\n\n\t'c' to run / continue execution\n\t'n' to step\n\t'l' to step a line (only available with debug info)\n\t'f' to step out\n\t'b' to set the breakpoint\n\t'r' for registers\n\t'p' for stack bytes\n\t'y' for advanced stack bytes\n\t'i' to inspect a value\n\t'm' to modify a value\n\t'v' show recent values (only available with debug info)\n\t'o' clear recent values (only available with debug info)\n\t'w' set value filter (only available with debug info)\n\t'W' break on a value filter match (only available with debug info)\n\t'F' continue to next function call/return\n\t's' toggle silent\n\t'S' toggle silent comments\n\t'q' to restart\n\t'x' to quit\n\t'z' to debug break\n\n");
 
   ResetConsoleColour();
 #endif
@@ -511,8 +512,11 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
             if (comment[0] == '#')
             {
-              fputs("\t\t", stdout);
-              puts(comment + 1);
+              if (!silenceComments)
+              {
+                fputs("\t\t", stdout);
+                puts(comment + 1);
+              }
             }
             else // Colour Label Descriptors Differently.
             {
@@ -589,16 +593,19 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         {
         case 'c':
           stepInstructions = false;
+          breakOnFunction = false;
           goto continue_execution;
 
         case 'n':
           stepByLine = false;
+          breakOnFunction = false;
           goto continue_execution;
 
         case 'l':
         {
           if (pDebugDatabase)
           {
+            breakOnFunction = false;
             stepByLine = true;
             goto continue_execution;
           }
@@ -614,11 +621,15 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           stepOut = true;
           stepInstructions = false;
           callStackCount = 0;
+          breakOnFunction = false;
           goto continue_execution;
 
         case 'F':
         {
           breakOnFunction = true;
+          stepInstructions = false;
+          stepByLine = false;
+          isLineEnd = false;
           goto continue_execution;
         }
 
@@ -904,9 +915,25 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           break;
         }
 
-        case 's':
-          silent = !silent;
+        case 'S':
+        {
+          silenceComments = !silenceComments;
+
+          fputs("Silent Comments: ", stdout);
+          puts(silenceComments ? "On" : "Off");
+
           break;
+        }
+
+        case 's':
+        {
+          silent = !silent;
+
+          fputs("Silent Output: ", stdout);
+          puts(silent ? "On" : "Off");
+
+          break;
+        }
 
         case 'z':
           __debugbreak();
@@ -1155,7 +1182,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_END();
 
       void *pTarget;
@@ -1189,7 +1216,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       const lls_code_t source_register = *pCodePtr;
       pCodePtr++;
 
-      LOG_U8(source_register);
+      LOG_REGISTER(source_register);
       LOG_DELIMITER();
 
       const uint8_t bytes = *pCodePtr;
@@ -1209,6 +1236,25 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       else IF_LAST_OPT(source_register < LLS_IREGISTER_COUNT + LLS_FREGISTER_COUNT)
         CopyBytes(pTarget, &fregister[source_register - LLS_IREGISTER_COUNT], bytes);
       ASSERT_NO_ELSE;
+
+#ifdef LLS_DEBUG_MODE
+      LOG_INFO_START();
+
+      uint8_t value[max(sizeof(uint64_t), sizeof(double))];
+
+      if (source_register < LLS_IREGISTER_COUNT)
+        CopyBytes(value, &iregister[source_register], bytes);
+      else
+        CopyBytes(value, &fregister[source_register - LLS_IREGISTER_COUNT], bytes);
+
+      fputs(" ", stdout);
+
+      for (size_t i = 0; i < bytes; i++)
+        printf("%02" PRIX8 " ", value[i]);
+
+      LOG_INFO_END();
+      LOG_END();
+#endif
 
       break;
     }
@@ -2109,7 +2155,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         pCodePtr += sizeof(uint64_t);
         LOG_U64(value);
 
-        cmp = iregister[value_register] == value;
+        cmp = iregister[value_register] != value;
       }
       else IF_LAST_OPT(value_register < LLS_IREGISTER_COUNT + LLS_FREGISTER_COUNT)
       {
@@ -2117,7 +2163,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
         pCodePtr += sizeof(double);
         LOG_F64(value);
 
-        cmp = fregister[value_register - LLS_IREGISTER_COUNT] == value;
+        cmp = fregister[value_register - LLS_IREGISTER_COUNT] != value;
       }
       ASSERT_NO_ELSE;
 
@@ -2631,7 +2677,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
             puts("");
           }
 
-          if (storeValue)
+          // Potentially Store Value.
           {
             size_t replaceByMatch = (size_t)-1;
             size_t replaceByAge = (size_t)-1;
@@ -2648,7 +2694,7 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               {
                 if (recentValues[j].pLocation->positionType == PT_InRegister && pVariableInfo->positionType == PT_InRegister && recentValues[j].pLocation->position == pVariableInfo->position)
                 {
-                  if (recentValues[j].highlighted)
+                  if (recentValues[j].highlighted && strcmp(recentValues[j].pLocation->name, pVariableInfo->name) != 0)
                   {
                     fflush(stdout);
                     SetConsoleColour(CC_Black, CC_DarkGray);
@@ -2678,15 +2724,18 @@ void llshost_EvaluateCode(llshost_state_t *pState)
               }
             }
 
-            const size_t replaceIndex = (replaceByMatch != (size_t)-1) ? replaceByMatch : replaceByAge;
-
-            if (replaceIndex != (size_t)-1)
+            if (storeValue || replaceByMatch != (size_t)-1)
             {
-              recentValues[replaceIndex].pLocation = pVariableInfo;
-              recentValues[replaceIndex].age = 0;
-              recentValues[replaceIndex].highlighted = highlighted;
-              recentValues[replaceIndex].globalCallStackCount = globalCallStackCount;
-              recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+              const size_t replaceIndex = (replaceByMatch != (size_t)-1) ? replaceByMatch : replaceByAge;
+
+              if (replaceIndex != (size_t)-1)
+              {
+                recentValues[replaceIndex].pLocation = pVariableInfo;
+                recentValues[replaceIndex].age = 0;
+                recentValues[replaceIndex].highlighted = highlighted;
+                recentValues[replaceIndex].globalCallStackCount = globalCallStackCount;
+                recentValues[replaceIndex].lastDisplayAge = (size_t)-1;
+              }
             }
           }
         }

@@ -109,7 +109,7 @@ namespace llsc
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
       {
-        if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
+        if (registers[i] != null && !(registers[i] is CNamedValue) && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           DumpValue(registers[i]);
           registers[i] = null;
@@ -173,7 +173,7 @@ namespace llsc
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
+        if (registers[i] != null && !(registers[i] is CNamedValue) && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           DumpValue(registers[i]);
           registers[i] = null;
@@ -236,7 +236,7 @@ namespace llsc
           return i;
 
       for (int i = Compiler.IntegerRegisters - 1; i >= 0; i--)
-        if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
+        if (registers[i] != null && !(registers[i] is CNamedValue) && (registers[i].remainingReferences == 0 || registers[i] is CConstIntValue || registers[i] is CConstFloatValue) && !registerLocked[i])
         {
           DumpValue(registers[i]);
           registers[i] = null;
@@ -262,7 +262,7 @@ namespace llsc
           return i;
 
       for (int i = Compiler.IntegerRegisters + Compiler.FloatRegisters - 1; i >= Compiler.IntegerRegisters; i--)
-        if (registers[i] != null && registers[i].remainingReferences == 0 && !registerLocked[i])
+        if (registers[i] != null && !(registers[i] is CNamedValue) && registers[i].remainingReferences == 0 && !registerLocked[i])
         {
           DumpValue(registers[i]);
           registers[i] = null;
@@ -553,7 +553,7 @@ namespace llsc
       if (targetPosition.type != PositionType.OnStack && sourceValue.type.GetSize() > 8)
         throw new Exception($"Internal Compiler Error: Value '{sourceValue}' cannot be moved, because it's > 8 bytes.");
 
-      CopyValueToPosition(sourceValue, targetPosition, stackSize);
+      CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
       MarkValueAsPosition(sourceValue, targetPosition, stackSize, isTouched);
     }
 
@@ -566,7 +566,7 @@ namespace llsc
 
       if (sourceValue.type.Equals(targetType))
       {
-        CopyValueToPosition(sourceValue, targetPosition, stackSize);
+        CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
         return;
       }
 
@@ -615,7 +615,7 @@ namespace llsc
         }
         else
         {
-          CopyValueToPosition(sourceValue, targetPosition, stackSize);
+          CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
         }
       }
       else if (sourceValue.type is FuncCType)
@@ -626,28 +626,28 @@ namespace llsc
       {
         if ((sourceValue.type as BuiltInCType).IsFloat() ^ (targetType as BuiltInCType).IsFloat())
         {
-          CopyValueToPosition(sourceValue, targetPosition, stackSize);
+          CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
           throw new NotImplementedException();
         }
         else if (!(sourceValue.type as BuiltInCType).IsFloat() && !(targetType as BuiltInCType).IsFloat())
         {
           if (targetType.GetSize() >= sourceValue.type.GetSize())
           {
-            CopyValueToPosition(sourceValue, targetPosition, stackSize);
+            CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
           }
           else
           {
             if (targetPosition.type == PositionType.InRegister)
             {
-              CopyValueToPosition(sourceValue, targetPosition, stackSize);
+              CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
               TruncateRegister(targetPosition.registerIndex, targetType.GetSize());
             }
             else if (targetPosition.type == PositionType.OnStack)
             {
               var tempPosition = Position.Register(GetFreeIntegerRegister(stackSize));
-              CopyValueToPosition(sourceValue, tempPosition, stackSize);
+              CopyValueToPosition(sourceValue, tempPosition, stackSize, sourceValue.type.GetSize());
               TruncateRegister(tempPosition.registerIndex, targetType.GetSize());
-              CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, true), targetPosition, stackSize);
+              CopyValueToPosition(new CValue(sourceValue.file, sourceValue.line, targetType, true), targetPosition, stackSize, sourceValue.type.GetSize());
             }
             else
             {
@@ -662,7 +662,7 @@ namespace llsc
       }
       else
       {
-        CopyValueToPosition(sourceValue, targetPosition, stackSize);
+        CopyValueToPosition(sourceValue, targetPosition, stackSize, sourceValue.type.GetSize());
       }
     }
 
@@ -894,12 +894,12 @@ namespace llsc
       }
     }
 
-    public void CopyValueToPosition(CValue sourceValue, Position position, SharedValue<long> stackSize)
+    public void CopyValueToPosition(CValue sourceValue, Position position, SharedValue<long> stackSize, long targetSize)
     {
       if (Compiler.DetailedIntermediateOutput)
         instructions.Add(new LLI_Comment_PseudoInstruction($"Copying Value '{sourceValue}' to {position}."));
 
-      var size = sourceValue.type.GetSize();
+      var sourceSize = sourceValue.type.GetSize();
 
       if (sourceValue is CConstIntValue)
       {
@@ -915,7 +915,7 @@ namespace llsc
 
           instructions.Add(new LLI_MovImmToRegister(register, bytes));
 
-          CopyRegisterToPosition(register, size, position, stackSize);
+          CopyRegisterToPosition(register, targetSize, position, stackSize);
         }
       }
       else if (sourceValue is CConstFloatValue)
@@ -932,7 +932,7 @@ namespace llsc
 
           instructions.Add(new LLI_MovImmToRegister(register, bytes));
 
-          CopyRegisterToPosition(register, size, position, stackSize);
+          CopyRegisterToPosition(register, targetSize, position, stackSize);
         }
       }
       else if (sourceValue is CNullValue)
@@ -949,7 +949,7 @@ namespace llsc
 
           instructions.Add(new LLI_MovImmToRegister(register, bytes));
 
-          CopyRegisterToPosition(register, size, position, stackSize);
+          CopyRegisterToPosition(register, targetSize, position, stackSize);
         }
       }
       else
@@ -959,7 +959,7 @@ namespace llsc
 
         if (sourceValue.position.type == PositionType.InRegister)
         {
-          CopyRegisterToPosition(sourceValue.position.registerIndex, size, position, stackSize);
+          CopyRegisterToPosition(sourceValue.position.registerIndex, targetSize, position, stackSize);
         }
         else if (sourceValue.position.type == PositionType.OnStack)
         {
@@ -967,14 +967,14 @@ namespace llsc
           {
             instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, position.registerIndex));
 
-            TruncateRegister(position.registerIndex, size);
+            TruncateRegister(position.registerIndex, Math.Min(sourceSize, targetSize));
           }
           else if (position.type == PositionType.OnStack)
           {
-            if (size == 8)
+            if (targetSize == 8)
               instructions.Add(new LLI_MovStackOffsetToStackOffset(stackSize, sourceValue.position.stackOffsetForward, stackSize, position.stackOffsetForward));
             else
-              instructions.Add(new LLI_MovStackOffsetToStackOffset_NBytes(stackSize, sourceValue.position.stackOffsetForward, stackSize, position.stackOffsetForward, (byte)size));
+              instructions.Add(new LLI_MovStackOffsetToStackOffset_NBytes(stackSize, sourceValue.position.stackOffsetForward, stackSize, position.stackOffsetForward, (byte)targetSize));
           }
           else
           {
@@ -982,7 +982,7 @@ namespace llsc
 
             instructions.Add(new LLI_MovStackOffsetToRegister(stackSize, sourceValue.position.stackOffsetForward, register));
 
-            CopyRegisterToPosition(register, size, position, stackSize);
+            CopyRegisterToPosition(register, targetSize, position, stackSize);
           }
         }
         else
@@ -990,7 +990,10 @@ namespace llsc
           // Store inplace.
           if (position.type == PositionType.InRegister && !(sourceValue.type is BuiltInCType && (sourceValue.type as BuiltInCType).IsFloat()))
           {
-            CopyPositionToRegisterInplace(position.registerIndex, size, sourceValue.position, stackSize);
+            CopyPositionToRegisterInplace(position.registerIndex, sourceSize, sourceValue.position, stackSize);
+
+            if (targetSize < sourceSize)
+              TruncateRegister(sourceValue.position.registerIndex, targetSize);
           }
           else
           {
@@ -998,8 +1001,8 @@ namespace llsc
 
             using (LockRegister(temp_register))
             {
-              CopyPositionToRegister(temp_register, size, sourceValue.position, stackSize);
-              CopyRegisterToPosition(temp_register, size, position, stackSize);
+              CopyPositionToRegister(temp_register, sourceSize, sourceValue.position, stackSize);
+              CopyRegisterToPosition(temp_register, targetSize, position, stackSize);
             }
           }
         }
@@ -1010,7 +1013,7 @@ namespace llsc
     {
       int registerIndex = value.type is BuiltInCType && (value.type as BuiltInCType).IsFloat() ? GetFreeFloatRegister(stackSize) : GetFreeIntegerRegister(stackSize);
 
-      CopyValueToPosition(value, Position.Register(registerIndex), stackSize);
+      CopyValueToPosition(value, Position.Register(registerIndex), stackSize, value.type.GetSize());
 
       return registerIndex;
     }

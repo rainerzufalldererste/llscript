@@ -206,10 +206,10 @@ namespace llsc
     public static CBuiltInFunction[] Functions = new CBuiltInFunction[]
     {
       new CBuiltInFunction("alloc", (byte)BuiltInFunctions.LLS_BF_ALLOC, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("size", (CType)BuiltInCType.Types["u64"]) }),
-      new CBuiltInFunction("free", (byte)BuiltInFunctions.LLS_BF_FREE, VoidCType.Instance, new Tuple<string, CType>[] { Tuple.Create("ptr", (CType)new PtrCType(VoidCType.Instance)) }),
+      new CBuiltInFunction("free", (byte)BuiltInFunctions.LLS_BF_FREE, VoidCType.Instance, new Tuple<string, CType>[] { Tuple.Create("ptr", (CType)new PtrCType(VoidCType.Instance) { isConst = true }) }),
       new CBuiltInFunction("realloc", (byte)BuiltInFunctions.LLS_BF_REALLOC, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("ptr", (CType)new PtrCType(VoidCType.Instance)), Tuple.Create("newSize", (CType)BuiltInCType.Types["u64"]) }),
-      new CBuiltInFunction("load_library", (byte)BuiltInFunctions.LLS_BF_LOAD_LIBRARY, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("libraryName", (CType)new PtrCType(BuiltInCType.Types["i8"])) }),
-      new CBuiltInFunction("get_proc_address", (byte)BuiltInFunctions.LLS_BF_GET_PROC_ADDRESS, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("libraryHandle", (CType)new PtrCType(VoidCType.Instance)), Tuple.Create("functionName", (CType)new PtrCType(BuiltInCType.Types["i8"])) }),
+      new CBuiltInFunction("load_library", (byte)BuiltInFunctions.LLS_BF_LOAD_LIBRARY, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("libraryName", (CType)new PtrCType(BuiltInCType.ConstTypes["i8"])) }),
+      new CBuiltInFunction("get_proc_address", (byte)BuiltInFunctions.LLS_BF_GET_PROC_ADDRESS, new PtrCType(VoidCType.Instance), new Tuple<string, CType>[] { Tuple.Create("libraryHandle", (CType)new PtrCType(VoidCType.Instance)), Tuple.Create("functionName", (CType)new PtrCType(BuiltInCType.ConstTypes["i8"])) }),
     };
 
     private const string File = "{compiler internal / built in function}";

@@ -361,6 +361,14 @@ namespace llsc
               case 't':
                 this.value += "\t";
                 break;
+
+              case 'n':
+                this.value += "\n";
+                break;
+
+              case 'r':
+                this.value += "\r";
+                break;
             }
 
             value = value.Substring(1);

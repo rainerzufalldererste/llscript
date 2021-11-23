@@ -75,6 +75,7 @@ namespace llsc
   public class BuiltInCType : CType
   {
     public static Dictionary<string, BuiltInCType> Types = (from x in Enum.GetNames(typeof(BuiltInTypes)) select x).ToDictionary(x => x, x => new BuiltInCType((BuiltInTypes)Enum.Parse(typeof(BuiltInTypes), x)));
+    public static Dictionary<string, BuiltInCType> ConstTypes = (from x in Enum.GetNames(typeof(BuiltInTypes)) select x).ToDictionary(x => x, x => new BuiltInCType((BuiltInTypes)Enum.Parse(typeof(BuiltInTypes), x)) { isConst = true });
 
     public readonly BuiltInTypes type;
 
@@ -83,7 +84,7 @@ namespace llsc
       this.type = type;
     }
 
-    public override bool Equals(object obj) => (obj is BuiltInCType && (obj as BuiltInCType).type == type);
+    public override bool Equals(object obj) => (obj is BuiltInCType && (obj as BuiltInCType).type == type && ((obj as BuiltInCType).isConst == isConst || !isConst));
 
     public override int GetHashCode() => type.GetHashCode();
 
@@ -118,7 +119,7 @@ namespace llsc
 
     public bool IsUnsigned() => type == BuiltInTypes.u64 || type == BuiltInTypes.u32 || type == BuiltInTypes.u16 || type == BuiltInTypes.u8;
 
-    public override string ToString() => type.ToString();
+    public override string ToString() => (isConst ? "const " : "") + type.ToString();
 
     public byte[] GetAsBytes(NIntegerValue value)
     {
@@ -198,9 +199,9 @@ namespace llsc
 
     public override int GetHashCode() => -(pointsTo.GetHashCode() + 1);
 
-    public override string ToString() => "ptr<" + pointsTo.ToString() + ">";
+    public override string ToString() => (isConst ? "const " : "") + "ptr<" + pointsTo.ToString() + ">";
 
-    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || (type as PtrCType).pointsTo == pointsTo) && ((pointsTo.isConst && (type as PtrCType).pointsTo.isConst) || !pointsTo.isConst));
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (type is PtrCType && ((type as PtrCType).pointsTo is VoidCType || pointsTo is VoidCType || pointsTo.Equals((type as PtrCType).pointsTo)) && ((pointsTo.isConst && (type as PtrCType).pointsTo.isConst) || !pointsTo.isConst));
 
     public override bool CanExplicitCastTo(CType type) => type is PtrCType || (type is BuiltInCType && !(type as BuiltInCType).IsFloat() && type.GetSize() == GetSize()) || type is FuncCType || type is ExternFuncCType;
 
@@ -226,7 +227,7 @@ namespace llsc
 
     public override string ToString() => "array<" + type.ToString() + ", " + count + ">";
 
-    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (this.Equals(type) || (type is PtrCType && (type as PtrCType).pointsTo == this.type && (((type as PtrCType).pointsTo.isConst && this.type.isConst) || !this.type.isConst)));
+    public override bool CanImplicitCastTo(CType type) => type.Equals(explicitCast) || (this.Equals(type) || (type is PtrCType && this.type.Equals((type as PtrCType).pointsTo) && (((type as PtrCType).pointsTo.isConst && this.type.isConst) || !this.type.isConst)));
 
     public override bool CanExplicitCastTo(CType type) => this.Equals(type) || type is PtrCType;
 
@@ -285,7 +286,7 @@ namespace llsc
 
     public override string ToString()
     {
-      string ret = "extern_func<" + returnType.ToString() + " (";
+      string ret = (isConst ? "const " : "") + "extern_func<" + returnType.ToString() + " (";
 
       for (int i = 0; i < parameters.Length; i++)
       {
@@ -319,7 +320,7 @@ namespace llsc
 
     public override string ToString()
     {
-      string ret = "func<" + returnType.ToString() + " (";
+      string ret = (isConst ? "const " : "") + "func<" + returnType.ToString() + " (";
 
       for (int i = 0; i < parameters.Length; i++)
       {
@@ -385,7 +386,7 @@ namespace llsc
 
     public override string ToString()
     {
-      return "struct " + name;
+      return (isConst ? "const " : "") + "struct " + name;
     }
 
     public override CType MakeCastableClone(CType targetType) => throw new Exception("Internal Compiler Error: Structs cannot be type converted.");

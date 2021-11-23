@@ -158,6 +158,7 @@ namespace llsc
   public class LLI_Location_PseudoInstruction : LLI_PseudoInstruction
   {
     public DbgLocationInfo locationInfo;
+    public string regpop;
 
     public LLI_Location_PseudoInstruction(CValue value, SharedValue<long> stackSize, ByteCodeState byteCodeState) : base(0)
     {
@@ -168,6 +169,16 @@ namespace llsc
 
       if (value.position.type == PositionType.InRegister && byteCodeState.registers[value.position.registerIndex] != value)
         throw new Exception("Internal Compiler Error: Value not available in specified register.");
+
+      if (value.position.type == PositionType.InRegister)
+      {
+        regpop = " [";
+
+        for (int i = 0; i < Compiler.IntegerRegisters; i++)
+          regpop += (byteCodeState.registers[i] == null ? "_" : "X");
+
+        regpop += "]";
+      }
     }
 
     public override void AppendBytecode(ref List<byte> byteCode) { }
@@ -178,6 +189,9 @@ namespace llsc
 
       switch (locationInfo.position.type)
       {
+        case PositionType.InRegister:
+          return ret + locationInfo.position.ToString() + regpop;
+
         case PositionType.OnStack:
           return ret + $"s:{locationInfo.stackSize.Value - locationInfo.position.stackOffsetForward}";
 

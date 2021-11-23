@@ -4,7 +4,7 @@ const text writeFileA = "WriteFile";
 voidptr kernel32dll_handle = load_library(kernel32dll);
 voidptr writeFileAAddr = get_proc_address(kernel32dll_handle, writeFileA);
 
-extern_func<u8 (voidptr, ptr<i8>, u32, ptr<u32>, voidptr)> writeFileAFunc = cast<extern_func<u8 (voidptr, ptr<i8>, u32, ptr<u32>, voidptr)>>(writeFileAAddr);
+extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)> writeFileAFunc = cast<extern_func<u8 (const voidptr, const ptr<i8>, u32, ptr<u32>, voidptr)>>(writeFileAAddr);
 
 text getStdHandle = "GetStdHandle";
 voidptr getStdHandleAddr = get_proc_address(kernel32dll_handle, getStdHandle);
