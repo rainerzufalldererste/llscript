@@ -6,6 +6,80 @@
 
 #include "llshost.h"
 
+#ifdef _WIN32
+#include <inttypes.h>
+#include <Windows.h>
+#include <winnt.h>
+#include <DbgHelp.h>
+
+#pragma comment(lib, "Dbghelp.lib")
+
+LONG WINAPI TopLevelExceptionHandler(IN EXCEPTION_POINTERS *pExceptionInfo)
+{
+  printf("Exception triggered: 0x%" PRIX32 ".\n", pExceptionInfo->ExceptionRecord->ExceptionCode);
+
+  do
+  {
+    char filename[MAX_PATH] = "llscript_exec.exe"; // Already filled in case `GetModuleFileNameA` fails.
+    GetModuleFileNameA(GetCurrentProcess(), filename, sizeof(filename));
+
+    const char dmpFileExtension[] = ".dmp";
+    strncat_s(filename, sizeof(filename), dmpFileExtension, sizeof(dmpFileExtension));
+
+    HANDLE fileHandle = CreateFileA(filename, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (fileHandle == INVALID_HANDLE_VALUE)
+      break;
+
+    MINIDUMP_EXCEPTION_INFORMATION exceptionInfo;
+    memset(&exceptionInfo, 0, sizeof(exceptionInfo));
+
+    exceptionInfo.ThreadId = exceptionInfo.ThreadId;
+    exceptionInfo.ExceptionPointers = exceptionInfo.ExceptionPointers;
+    exceptionInfo.ClientPointers = TRUE;
+
+    printf("Attempting to write minidump to '%s'.", filename);
+
+    if (TRUE != MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), fileHandle, MiniDumpWithFullMemory | MiniDumpWithThreadInfo, &exceptionInfo, NULL, NULL))
+      printf("Failed to write crash dump with error code 0x%" PRIu32 ".\n", GetLastError());
+
+  } while (0);
+
+  fflush(stdout);
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+BOOL WINAPI _SignalHandler(DWORD type)
+{
+  printf("Signal triggered: 0x%" PRIX32 ".\n", type);
+
+  do
+  {
+    char filename[MAX_PATH] = "llscript_exec.exe"; // Already filled in case `GetModuleFileNameA` fails.
+    GetModuleFileNameA(GetCurrentProcess(), filename, sizeof(filename));
+
+    const char dmpFileExtension[] = ".dmp";
+    strncat_s(filename, sizeof(filename), dmpFileExtension, sizeof(dmpFileExtension));
+
+    HANDLE fileHandle = CreateFileA(filename, GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (fileHandle == INVALID_HANDLE_VALUE)
+      break;
+
+    printf("Attempting to write minidump to '%s'.", filename);
+
+    if (TRUE != MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), fileHandle, MiniDumpWithFullMemory | MiniDumpWithThreadInfo, NULL, NULL, NULL))
+      printf("Failed to write crash dump with error code 0x%" PRIu32 ".\n", GetLastError());
+
+  } while (0);
+
+  fflush(stdout);
+
+  return TRUE;
+}
+#endif
+
 int32_t main(const int32_t argc, const char **pArgv)
 {
   if (argc != 2)
@@ -14,6 +88,11 @@ int32_t main(const int32_t argc, const char **pArgv)
     puts("Build Time: " __TIMESTAMP__);
     return -1;
   }
+
+#ifdef _WIN32
+  SetUnhandledExceptionFilter(TopLevelExceptionHandler);
+  SetConsoleCtrlHandler(_SignalHandler, TRUE);
+#endif
 
   uint8_t *pByteCode = NULL;
 

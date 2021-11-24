@@ -5,9 +5,11 @@ windows:
   stage: build
   script: "buildscripts/build.bat"
   artifacts:
+    when: always
     paths:
       - builds/bin/
     expire_in: 60 mins
   tags:
     - windows
-    - vs2019
+    - vs2015
+    - EU

@@ -60,12 +60,12 @@ void TestWithParams(string test, string param)
   string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile}{param} -o=\"{byteCodeFile}\"", out int exitCode);
  
   if (exitCode != 0)
-    Fail($"Failed to compile test {test}\n\n{output}");
+    Fail($"Failed to compile test {test} (error code 0x{exitCode:X})\n\n{output}");
   
   output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
  
   if (exitCode != 0)
-    Fail($"Failed to execute test {test}\n\n{output}");
+    Fail($"Failed to execute test {test} (error code 0x{exitCode:X})\n\n{output}");
  
   var expected = File.ReadAllText(test.Replace("lls", "txt"));
   
@@ -79,7 +79,7 @@ try
 
   var tests = Directory.GetFiles("tests/", "*.lls");
 
-  Console.WriteLine($"\nRunning {tests.Count()} UnitTest(s)...\n");
+  Console.WriteLine($"\nRunning {tests.Length} UnitTest(s)...\n");
 
   foreach (var test in tests)
   {
