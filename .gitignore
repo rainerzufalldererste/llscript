@@ -278,3 +278,4 @@ enc_temp_folder/*
 builds/*
 * Advisor Result*/
 buildscripts/tmp/*
+buildscripts/csi/*

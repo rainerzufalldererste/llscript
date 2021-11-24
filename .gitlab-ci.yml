@@ -1,0 +1,13 @@
+stages:
+  - build
+
+windows:
+  stage: build
+  script: "buildscripts/build.bat"
+  artifacts:
+    paths:
+      - builds/bin/
+    expire_in: 60 mins
+  tags:
+    - windows
+    - vs2019
