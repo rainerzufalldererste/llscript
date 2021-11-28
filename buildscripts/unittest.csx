@@ -42,9 +42,6 @@ string CallProcess(string processName, string args, out int exitCode)
   process.Start();
   process.BeginOutputReadLine();
   process.WaitForExit();
-
-  System.Threading.Thread.Sleep(200);
-
   process.CancelOutputRead();
 
   exitCode = process.ExitCode;
@@ -52,28 +49,34 @@ string CallProcess(string processName, string args, out int exitCode)
   return outputBuilder.ToString();
 }
 
-string scriptFile = "tmp/code.lls";
+string scriptFile = "tmp\\code.lls";
 
 void TestWithParams(string test, string param)
 {
   Console.WriteLine("\t" + (string.IsNullOrEmpty(param) ? "(default)" : param));
  
-  string byteCodeFile = "tmp/bytecode.lls";
+  string byteCodeFile = "tmp\\bytecode.lls";
+  string outputFile = "tmp\\out.txt";
 
   string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile}{param} -o=\"{byteCodeFile}\"", out int exitCode);
  
   if (exitCode != 0)
     Fail($"Failed to compile test {test} (error code 0x{exitCode:X})\n\n{output}");
   
-  output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
+  output = CallProcess("C:\\Windows\\System32\\cmd.exe", $"/C ..\\builds\\bin\\llscript_exec.exe {byteCodeFile} > {outputFile}", out exitCode);
  
   if (exitCode != 0)
     Fail($"Failed to execute test {test} (error code 0x{exitCode:X})\n\n{output}");
+
+  System.Threading.Thread.Sleep(200);
  
   var expected = File.ReadAllText(test.Replace("lls", "txt"));
+  var received = File.ReadAllText(outputFile);
   
-  if (expected != output)
-    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
+  File.Delete(outputFile);
+
+  if (expected != received)
+    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({received.Length} chars) '{received}'");
 }
 
 try
