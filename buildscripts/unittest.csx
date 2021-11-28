@@ -13,16 +13,13 @@ void Fail(string error)
 
 string CallProcess(string processName, string args, out int exitCode)
 {
-  StringBuilder outputBuilder;
   System.Diagnostics.ProcessStartInfo processStartInfo;
   System.Diagnostics.Process process;
 
-  outputBuilder = new StringBuilder();
-
   processStartInfo = new System.Diagnostics.ProcessStartInfo();
   processStartInfo.CreateNoWindow = true;
-  processStartInfo.RedirectStandardOutput = true;
-  processStartInfo.RedirectStandardInput = true;
+  processStartInfo.RedirectStandardOutput = false;
+  processStartInfo.RedirectStandardInput = false;
   processStartInfo.UseShellExecute = false;
   processStartInfo.Arguments = args;
   processStartInfo.FileName = processName;
@@ -30,23 +27,13 @@ string CallProcess(string processName, string args, out int exitCode)
   process = new System.Diagnostics.Process();
   process.StartInfo = processStartInfo;
   process.EnableRaisingEvents = true;
-
-  process.OutputDataReceived += new System.Diagnostics.DataReceivedEventHandler
-  (
-    delegate(object sender, System.Diagnostics.DataReceivedEventArgs e)
-    {
-      outputBuilder.Append(e.Data);
-    }
-  );
   
   process.Start();
-  process.BeginOutputReadLine();
   process.WaitForExit();
-  process.CancelOutputRead();
 
   exitCode = process.ExitCode;
 
-  return outputBuilder.ToString();
+  return "";
 }
 
 string scriptFile = "tmp\\code.lls";
@@ -76,7 +63,7 @@ void TestWithParams(string test, string param)
   File.Delete(outputFile);
 
   if (expected != received)
-    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({received.Length} chars) '{received}'");
+    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nReceived: ({received.Length} chars) '{received}'");
 }
 
 try
