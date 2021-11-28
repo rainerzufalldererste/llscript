@@ -13,13 +13,16 @@ void Fail(string error)
 
 string CallProcess(string processName, string args, out int exitCode)
 {
+  StringBuilder outputBuilder;
   System.Diagnostics.ProcessStartInfo processStartInfo;
   System.Diagnostics.Process process;
 
+  outputBuilder = new StringBuilder();
+
   processStartInfo = new System.Diagnostics.ProcessStartInfo();
   processStartInfo.CreateNoWindow = true;
-  processStartInfo.RedirectStandardOutput = false;
-  processStartInfo.RedirectStandardInput = false;
+  processStartInfo.RedirectStandardOutput = true;
+  processStartInfo.RedirectStandardInput = true;
   processStartInfo.UseShellExecute = false;
   processStartInfo.Arguments = args;
   processStartInfo.FileName = processName;
@@ -27,43 +30,47 @@ string CallProcess(string processName, string args, out int exitCode)
   process = new System.Diagnostics.Process();
   process.StartInfo = processStartInfo;
   process.EnableRaisingEvents = true;
+
+  process.OutputDataReceived += new System.Diagnostics.DataReceivedEventHandler
+  (
+    delegate(object sender, System.Diagnostics.DataReceivedEventArgs e)
+    {
+      outputBuilder.Append(e.Data);
+    }
+  );
   
   process.Start();
+  process.BeginOutputReadLine();
   process.WaitForExit();
+  process.CancelOutputRead();
 
   exitCode = process.ExitCode;
 
-  return "";
+  return outputBuilder.ToString();
 }
 
-string scriptFile = "tmp\\code.lls";
+string scriptFile = "tmp/code.lls";
 
 void TestWithParams(string test, string param)
 {
   Console.WriteLine("\t" + (string.IsNullOrEmpty(param) ? "(default)" : param));
  
-  string byteCodeFile = "tmp\\bytecode.lls";
-  string outputFile = "tmp\\out.txt";
+  string byteCodeFile = "tmp/bytecode.lls";
 
   string output = CallProcess("..\\builds\\bin\\llsc.exe", $"{scriptFile}{param} -o=\"{byteCodeFile}\"", out int exitCode);
  
   if (exitCode != 0)
     Fail($"Failed to compile test {test} (error code 0x{exitCode:X})\n\n{output}");
   
-  output = CallProcess("C:\\Windows\\System32\\cmd.exe", $"/C ..\\builds\\bin\\llscript_exec.exe {byteCodeFile} > {outputFile}", out exitCode);
+  output = CallProcess("..\\builds\\bin\\llscript_exec.exe", byteCodeFile, out exitCode);
  
   if (exitCode != 0)
     Fail($"Failed to execute test {test} (error code 0x{exitCode:X})\n\n{output}");
-
-  System.Threading.Thread.Sleep(200);
  
   var expected = File.ReadAllText(test.Replace("lls", "txt"));
-  var received = File.ReadAllText(outputFile);
   
-  File.Delete(outputFile);
-
-  if (expected != received)
-    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nReceived: ({received.Length} chars) '{received}'");
+  if (expected != output)
+    Fail($"Invalid output for test {test}\n\nExpected:  ({expected.Length} chars) '{expected}'\nRetrieved: ({output.Length} chars) '{output}'");
 }
 
 try
