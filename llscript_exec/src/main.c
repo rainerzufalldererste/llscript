@@ -110,10 +110,13 @@ int32_t main(const int32_t argc, const char **pArgv)
     const uint8_t shellcode[] = { 0x33, 0xC0, 0xC2, 0x04, 0x00 }; // xor eax, eax; ret 0x4; -> return 0;
     DWORD oldProtect;
     
-    if (FALSE == VirtualProtect(pPosition, sizeof(shellcode), PAGE_READWRITE, &oldProtect))
+    if (FALSE == VirtualProtect(pPosition, sizeof(shellcode), PAGE_EXECUTE_READWRITE, &oldProtect))
       break;
     
     if (FALSE == WriteProcessMemory(GetCurrentProcess(), pPosition, shellcode, sizeof(shellcode), NULL))
+      break;
+
+    if (FALSE == VirtualProtect(pPosition, sizeof(shellcode), oldProtect, NULL))
       break;
 
     FreeLibrary(kernel32);
