@@ -42,6 +42,9 @@ string CallProcess(string processName, string args, out int exitCode)
   process.Start();
   process.BeginOutputReadLine();
   process.WaitForExit();
+
+  System.Threading.Thread.Sleep(200);
+
   process.CancelOutputRead();
 
   exitCode = process.ExitCode;
