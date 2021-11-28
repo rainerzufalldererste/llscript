@@ -54,8 +54,14 @@ push rbp
 push rbx
 push rdi
 push rsi
-sub rsp, 120 ; this needs to be 16 bit aligned minus 8 (because `call` will push 8 bytes to the stack)
+
+; store the original rsp in rsi.
 mov rsi, rsp
+
+; rsp needs to be 16 bit aligned minus 8 (because `call` will push 8 bytes to the stack)
+sub rsp, 256
+and rsp, 0fffffffffffffff0h
+add rsp, 8
 
 
 ; Move script stack ptr to rax.
@@ -75,7 +81,7 @@ cmp rbx, 1
 je after_param1
 
 ; it's a float param: set to xmm0.
-movsd xmm0, qword ptr [rcx]
+movsd xmm0, qword ptr [rax]
 
 after_param1:
 ; move to next param.
@@ -94,7 +100,7 @@ cmp rbx, 1
 je after_param2
 
 ; it's a float param: set to xmm1.
-movsd xmm1, qword ptr [rdx]
+movsd xmm1, qword ptr [rax]
 
 after_param2:
 ; move to next param.
@@ -113,7 +119,7 @@ cmp rbx, 1
 je after_param3
 
 ; it's a float param: set to xmm2.
-movsd xmm2, qword ptr [r8]
+movsd xmm2, qword ptr [rax]
 
 after_param3:
 ; move to next param.
@@ -132,19 +138,32 @@ cmp rbx, 1
 je after_param4
 
 ; it's a float param: set to xmm2.
-movsd xmm3, qword ptr [r9]
+movsd xmm3, qword ptr [rax]
 
 after_param4:
 ; move to next param.
 sub rax, 8
+
+; Prepare RBP to conain the stack pointer for additional parameters. (start at rsp+32 and add 8 for each parameter)
+mov rbp, rsp
+add rbp, 32
 
 ; Remaining Params
 remaining_params:
 M_JUMP_TO_DO_CALL_IF_LAST
 
 ; Push all remaining params to the stack.
-push [rax]
+mov rbp, qword ptr [rax]
+
+; Move to the next param.
 sub rax, 8
+
+; parameters may be float/int, but that doesn't matter here, since x64 calling convention simply wants all of them to reside on the stack after param 4.
+
+; Move rbp to point to the next param storage pointer.
+add rbp, 8
+
+; Repeat until there are no more params remaining.
 jmp remaining_params
 
 
@@ -177,11 +196,12 @@ movsd qword ptr [rsp], xmm0
 mov rax, qword ptr [rsp]
 
 
-
 end_func:
-; Free Stack Space.
+
+; Move stack to where we previously stored it.
 mov rsp, rsi
-add rsp, 120
+
+; Free Stack Space.
 pop rsi
 pop rdi
 pop rbx

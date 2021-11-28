@@ -50,7 +50,7 @@ LONG WINAPI TopLevelExceptionHandler(IN EXCEPTION_POINTERS *pExceptionInfo)
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-BOOL WINAPI _SignalHandler(DWORD type)
+BOOL WINAPI SignalHandler(DWORD type)
 {
   printf("Signal triggered: 0x%" PRIX32 ".\n", type);
 
@@ -90,8 +90,34 @@ int32_t main(const int32_t argc, const char **pArgv)
   }
 
 #ifdef _WIN32
+  CoInitialize(NULL);
   SetUnhandledExceptionFilter(TopLevelExceptionHandler);
-  SetConsoleCtrlHandler(_SignalHandler, TRUE);
+  SetConsoleCtrlHandler(SignalHandler, TRUE);
+
+  // Prevent anyone in the future to override our unhandled exception filter.
+  do
+  {
+    HANDLE kernel32 = LoadLibraryA("kernel32.dll");
+
+    if (kernel32 == INVALID_HANDLE_VALUE || kernel32 == NULL)
+      break;
+
+     void *pPosition = (void *)GetProcAddress(kernel32, "SetUnhandledExceptionFilter");
+    
+    if (pPosition == NULL)
+      break;
+
+    const uint8_t shellcode[] = { 0x33, 0xC0, 0xC2, 0x04, 0x00 }; // xor eax, eax; ret 0x4; -> return 0;
+    DWORD oldProtect;
+    
+    if (FALSE == VirtualProtect(pPosition, sizeof(shellcode), PAGE_READWRITE, &oldProtect))
+      break;
+    
+    if (FALSE == WriteProcessMemory(GetCurrentProcess(), pPosition, shellcode, sizeof(shellcode), NULL))
+      break;
+
+    FreeLibrary(kernel32);
+  } while (0);
 #endif
 
   uint8_t *pByteCode = NULL;

@@ -78,7 +78,10 @@ bool _IsBadReadPtr(const void *pPtr, const size_t size, const uint8_t *pStackBas
   return true;
 }
 
-__forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
+#ifndef _DEBUG
+__forceinline
+#endif
+void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pState)
 {
   bool possiblePointer = false;
 
@@ -89,21 +92,39 @@ __forceinline void LOG_INSPECT_INTEGER(const uint64_t param, llshost_state_t *pS
   }
   else if (param > 0x00007FF000000000 && param < 0x00007FFFFFFFFFFF)
   {
-    puts("\t\t// \tCould be heap pointer.");
+    puts("\t\t// \tCould be heap pointer:");
   }
 
-  if (possiblePointer && !_IsBadReadPtr(possiblePointer, 8, pState->pStack, pState->pCode))
+  if (possiblePointer && !_IsBadReadPtr((const void *)param, 8, pState->pStack, pState->pCode))
   {
-    const uint64_t value = *(const uint64_t *)param;
-    fputs("\t\t// \t", stdout);
+    {
+      const uint64_t value = *(const uint64_t *)param;
+      fputs("\t\t// \t", stdout);
 
-    LOG_U64_AS_BYTES(value);
+      LOG_U64_AS_BYTES(value);
 
-    fputs("... \t", stdout);
+      fputs("... \t", stdout);
 
-    LOG_U64_AS_STRING(value);
+      LOG_U64_AS_STRING(value);
+    }
 
-    puts(" ...");
+    if (!_IsBadReadPtr((const void *)param, 16, pState->pStack, pState->pCode))
+    {
+      const uint64_t value = *(const uint64_t *)(param + 8);
+      fputs("\n\t\t// \t", stdout);
+
+      LOG_U64_AS_BYTES(value);
+
+      fputs("... \t", stdout);
+
+      LOG_U64_AS_STRING(value);
+
+      puts(" ...");
+    }
+    else
+    {
+      puts(" ...");
+    }
   }
 }
 
@@ -355,6 +376,7 @@ LONG WINAPI TopLevelExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 #define LOG_INFO_START()
 #define LOG_INFO_END()
 #define LOG_END()
+#define LOG_INSPECT_INTEGER(a, b)
 #endif
 
 __forceinline void CopyBytes(void *pTarget, const void *pSource, size_t bytes)
@@ -2470,6 +2492,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_INFO_START();
           LOG_X64(iregister[1]);
           LOG_INFO_END();
+          LOG_END();
+          LOG_INSPECT_INTEGER(iregister[1], pState);
 
           HMODULE(*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
 
@@ -2500,6 +2524,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_DELIMITER();
           LOG_X64(iregister[2]);
           LOG_INFO_END();
+          LOG_END();
+          LOG_INSPECT_INTEGER(iregister[2], pState);
 
           FARPROC(*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
 
