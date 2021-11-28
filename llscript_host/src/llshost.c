@@ -2376,7 +2376,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         iregister[target_register] = result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", result, (int64_t)result, result);
+        if (!silent)
+          printf("\t\t// Return Value: %" PRIu64 " / %" PRIi64 " (0x%" PRIX64 ")\n", result, (int64_t)result, result);
 
         LOG_INSPECT_INTEGER(result, pState);
 #endif
@@ -2385,7 +2386,8 @@ void llshost_EvaluateCode(llshost_state_t *pState)
       {
         fregister[target_register - LLS_IREGISTER_COUNT] = *(double *)&result;
 #ifdef LLS_DEBUG_MODE
-        printf("\t\t// Return Value: %f (0x%" PRIX64 ")\n", *(double *)result, result);
+        if (!silent)
+          printf("\t\t// Return Value: %f (0x%" PRIX64 ")\n", *(double *)result, result);
 #endif
       }
       ASSERT_NO_ELSE;
@@ -2493,7 +2495,10 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_X64(iregister[1]);
           LOG_INFO_END();
           LOG_END();
-          LOG_INSPECT_INTEGER(iregister[1], pState);
+#ifdef LLS_DEBUG_MODE
+          if (!silent)
+            LOG_INSPECT_INTEGER(iregister[1], pState);
+#endif
 
           HMODULE(*LoadLibraryA)(LPCSTR lpLibFileName) = pState->pLoadLibrary;
 
@@ -2525,7 +2530,10 @@ void llshost_EvaluateCode(llshost_state_t *pState)
           LOG_X64(iregister[2]);
           LOG_INFO_END();
           LOG_END();
-          LOG_INSPECT_INTEGER(iregister[2], pState);
+#ifdef LLS_DEBUG_MODE
+          if (!silent)
+            LOG_INSPECT_INTEGER(iregister[2], pState);
+#endif
 
           FARPROC(*GetProcAddress)(HMODULE hModule, LPCSTR lpProcName) = pState->pGetProcAddress;
 

@@ -39,8 +39,10 @@ filter { }
 filter { "configurations:Debug*" }
   defines { "_DEBUG" }
   symbols "FastLink"
+  links { "msvcrtd.lib", "vcruntimed.lib", "ucrtd.lib" }
 
 filter { "configurations:Release" }
 	defines { "NDEBUG" }
 	optimize "Speed"
   symbols "On"
+  ignoredefaultlibraries { "msvcrt" }

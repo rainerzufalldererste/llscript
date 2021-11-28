@@ -148,12 +148,15 @@ sub rax, 8
 mov rbp, rsp
 add rbp, 32
 
+
+
 ; Remaining Params
 remaining_params:
 M_JUMP_TO_DO_CALL_IF_LAST
 
 ; Push all remaining params to the stack.
-mov rbp, qword ptr [rax]
+mov rdi, qword ptr [rax]
+mov qword ptr [rbp], rdi
 
 ; Move to the next param.
 sub rax, 8
@@ -166,8 +169,6 @@ add rbp, 8
 ; Repeat until there are no more params remaining.
 jmp remaining_params
 
-
-; TODO: Do we need to pop the values from the stack as well?
 
 
 do_call:
@@ -194,6 +195,7 @@ call qword ptr [rax]
 ; move result to rax to pretend it's a uint64_t.
 movsd qword ptr [rsp], xmm0
 mov rax, qword ptr [rsp]
+
 
 
 end_func:

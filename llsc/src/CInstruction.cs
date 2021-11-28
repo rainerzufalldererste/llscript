@@ -831,7 +831,6 @@ namespace llsc
             throw new Exception("Internal Compiler Error!");
 
           byteCodeState.FreeRegister(returnValueRegister, stackSize);
-          byteCodeState.instructions.Add(new LLI_Location_PseudoInstruction(functionPtr, stackSize, byteCodeState));
           byteCodeState.instructions.Add(new LLI_PushRegister((byte)functionPtr.position.registerIndex));
           pushedBytes += 8;
         }
