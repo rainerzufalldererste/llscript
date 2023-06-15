@@ -1,0 +1,13 @@
+const text kernel32dll = "User32.dll"; // `text` maps to `ptr<i8>`.
+const text messageBoxA = "MessageBoxA";
+
+// `load_library` is provided by the compiler.
+// other builtin functions include `alloc`, `free`, `realloc`, `get_proc_address`.
+voidptr kernel32dll_handle = load_library(kernel32dll); // `voidptr` maps to `ptr<void>`.
+voidptr messageBoxAAddr = get_proc_address(kernel32dll_handle, messageBoxA);
+
+// this is how casts and pointers to external function work.
+extern_func<i32 (const voidptr, const text, const text, u32)> messageBoxAFunc = 
+  cast<extern_func<i32 (const voidptr, const text, const text, u32)>>(messageBoxAAddr);
+
+messageBoxAFunc(null, "Hello from the other side!", "Very Important Message", 0);

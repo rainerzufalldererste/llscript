@@ -38,6 +38,9 @@ typedef struct
   uint64_t stackSize;
   uint8_t *pStack;
   void *pLoadLibrary, *pGetProcAddress, *pHeapAlloc, *pHeapRealloc, *pHeapFree, *pHeapDestroy, *pHeapHandle;
+#ifdef LS_DBG_MESSAGEBOX
+  int32_t (*pMessageBoxA)(const void *hWnd, const char *pText, const char *pCaption, const uint32_t type);
+#endif
 } llshost_state_t;
 
 // This function will look for `LLS_CODE_START_PATTERN` after the function.
@@ -49,7 +52,7 @@ uint8_t llshost(void *pCodePtr);
 // Returns 0 on Error (code pointer is null or stack memory allocation failure).
 uint8_t llshost_from_state(llshost_state_t *pState);
 
-#define LLS_CODE_START_PATTERN (0x31719E1203636F37)
+#define LLS_CODE_START_PATTERN (0x31719E1203636F37) // this equates to `37 6F 63 03 12 9E 71 31`.
 #define LLS_DEFUALT_STACK_SIZE (0x6000) // 24 KB
 
 #endif // llshost_h__

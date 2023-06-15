@@ -19,8 +19,6 @@ ENDM
 ; Code
 
 .code
-dq 0F1F840000000000H ; this is a nop statement that will be looked for.
-dq 9090909090909090H ; more nops.
 
 ; this actually is:
 ;  uint64_t __lls__call_func(const uint64_t *pStack);
@@ -49,6 +47,10 @@ dq 9090909090909090H ; more nops.
 ;      the address of the function that will be called.
 ;
 __lls__call_func:
+dq 9090909090909090H ; some nops to try guarantee proper alignment?
+dq 0000000000841F0FH ; this is a nop statement that will be looked for to find this function.
+dq 9090909090909090H ; more nops.
+
 ; Reserve Stack Space.
 push rbp
 push rbx
@@ -58,10 +60,10 @@ push rsi
 ; store the original rsp in rsi.
 mov rsi, rsp
 
-; rsp needs to be 16 bit aligned minus 8 (because `call` will push 8 bytes to the stack)
+; rsp needs to be 16 bit aligned.
 sub rsp, 256
 and rsp, 0fffffffffffffff0h
-add rsp, 8
+; add rsp, 8 ; Previously we were subtracting 8 here to leave the stack aligned after `call` has pushed the current `RIP` onto the stack, but that appeared to not be what functions expected.
 
 
 ; Move script stack ptr to rax.

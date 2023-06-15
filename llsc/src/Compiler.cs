@@ -21,6 +21,7 @@ namespace llsc
     public static bool EmitDbgDatabse { get; private set; } = false;
 
     public static bool DetailedIntermediateOutput { get; private set; } = false;
+    public static bool EmitOpCodeBytesInAsm { get; private set; } = false;
 
     public static readonly int IntegerRegisters = 8;
     public static readonly int FloatRegisters = 8;
@@ -66,10 +67,42 @@ namespace llsc
         Error($"Warning treated as error: '{warning}'", file, line);
     }
 
+    const string HideWarings = "-NoWarn";
+    const string FatalWarnings = "-FatalWarnings";
+    const string DoNotOptimize = "-O0";
+    const string NormalOptimization = "-O1";
+    const string EmitAssembly = "-S";
+    const string EmitAssemblyAndDetailedIntermediateResult = "-S+";
+    const string EmitOpCodeBytesInAssembly = "-Sop";
+    const string WriteDebugDatabase = "-dbgdb";
+    const string OutFileName = "-o=";
+    const string Assumption = "-assume=";
+
     [STAThread]
     static void Main(string[] args)
     {
       Console.WriteLine($"llsc - LLS Bytecode Compiler (Build Version: {Assembly.GetExecutingAssembly().GetName().Version})\n");
+
+      if (args.Length == 0)
+      {
+        Console.WriteLine($"\t{HideWarings}\t\t\t\tdon't display warings");
+        Console.WriteLine($"\t{FatalWarnings}\t\t\ttreat warnings as errors");
+        Console.WriteLine($"\t{DoNotOptimize}\t\t\t\tturn off optimizations");
+        Console.WriteLine($"\t{NormalOptimization}\t\t\t\tdefault level of optimization");
+        Console.WriteLine($"\t{EmitAssembly}\t\t\t\temit bytecode disassembly");
+        Console.WriteLine($"\t{EmitAssemblyAndDetailedIntermediateResult}\t\t\t\temit bytecode disassembly with additional detailed comments");
+        Console.WriteLine($"\t{EmitOpCodeBytesInAssembly}\t\t\t\temit bytecode disassembly with op code bytes");
+        Console.WriteLine($"\t{WriteDebugDatabase}\t\t\t\temit debug database");
+        Console.WriteLine($"\t{OutFileName}<filename>\t\t\tspecify custom output file path (default: 'bytecode.lls')");
+        Console.Write($"\t{Assumption}<assumption>\t\tspecify an assumption to the compiler. available assumptions: ");
+
+        foreach (var x in typeof(Compiler.Assumptions).GetFields())
+          Console.Write($"{x.Name} ");
+
+        Console.WriteLine();
+
+        Environment.Exit(0);
+      }
 
       string outFileName = "bytecode.lls";
       IEnumerable<FileContents> files = null;
@@ -81,39 +114,48 @@ namespace llsc
         {
           switch (argument)
           {
-            case "-NoWarn":
+            case HideWarings:
               ShowWarnings = false;
               break;
 
-            case "-FatalWarnings":
+            case FatalWarnings:
               WarningsAsErrors = true;
               break;
 
-            case "-O0":
+            case DoNotOptimize:
               OptimizationLevel = 0;
               break;
 
-            case "-S":
+            case NormalOptimization:
+              OptimizationLevel = 1;
+              break;
+
+            case EmitAssembly:
               EmitAsm = true;
               break;
 
-            case "-S+":
+            case EmitAssemblyAndDetailedIntermediateResult:
               EmitAsm = true;
               DetailedIntermediateOutput = true;
               break;
 
-            case "-dbgdb":
+            case EmitOpCodeBytesInAssembly:
+              EmitAsm = true;
+              EmitOpCodeBytesInAsm = true;
+              break;
+
+            case WriteDebugDatabase:
               EmitDbgDatabse = true;
               break;
 
             default:
-              if (argument.StartsWith("-o="))
+              if (argument.StartsWith(OutFileName))
               {
-                outFileName = argument.Substring(3).Trim('\'', '\"');
+                outFileName = argument.Substring(OutFileName.Length).Trim('\'', '\"');
               }
-              else if (argument.StartsWith("-assume="))
+              else if (argument.StartsWith(Assumption))
               {
-                var assumption = argument.Substring("-assume=".Length).Trim('\'', '\"');
+                var assumption = argument.Substring(Assumption.Length).Trim('\'', '\"');
 
                 var field = typeof(Compiler.Assumptions).GetField(assumption);
 
@@ -279,6 +321,21 @@ namespace llsc
 
           if (file != null && file.Length > lastLine && lastLine >= 0)
             lines.Add((printedFile ? "" : "\r\n") + $"# Line {lastLine + 1:   0}: {file[lastLine]}");
+        }
+
+        if (EmitOpCodeBytesInAsm)
+        {
+          List<byte> bytes = new List<byte>();
+
+          if (instruction.bytecodeSize > 0)
+            instruction.AppendBytecode(ref bytes);
+
+          string byteString = "";
+
+          foreach (byte b in bytes)
+            byteString += $"{b:X2} ";
+
+          lines.Add($"# Bytes: {byteString}({instruction.bytecodeSize} bytes)");
         }
 
         lines.Add($"{instruction.ToString().PadRight(90)} # 0x{instruction.position:X}");

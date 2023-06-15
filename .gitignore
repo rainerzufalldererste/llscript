@@ -263,6 +263,7 @@ __pycache__/
 # Project & Solution Files
 *.sln
 *.vcxpro*
+*.cspro*
 
 # Visual Studio Code configuration files
 *.vscode/
@@ -272,10 +273,9 @@ Makefile
 *.make
 
 # Additional Files
-mediaLib/lib/*.lib
-htCodec/3rdParty/rans_static/lib/*
 enc_temp_folder/*
 builds/*
 * Advisor Result*/
 buildscripts/tmp/*
 buildscripts/csi/*
+*.bin.bak

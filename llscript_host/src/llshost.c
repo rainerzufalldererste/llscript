@@ -25,7 +25,9 @@
 #define ASSERT(x)
 #endif
 
-#define LLS_NOT_POSITION_INDEPENDENT
+#ifdef _DEBUG
+  #define LLS_NOT_POSITION_INDEPENDENT
+#endif
 
 #ifdef LLS_DEBUG_MODE
 // Debug Mode Is NOT POSITION INDEPENDENT!
@@ -361,7 +363,25 @@ LONG WINAPI TopLevelExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 }
 
 #else
+#ifdef LS_DBG_MESSAGEBOX
+#define LOG_INSTRUCTION_NAME(x) \
+  do { \
+    struct { uint64_t text0; } packed; \
+    packed.text0 = 0x783020504F; \
+    const uint8_t c = opcode; \
+    if ((c & 0xF) <= 0x9) \
+      packed.text0 |= ((uint64_t)((c & 0xF) + '0') << (8 * 6)); \
+    else \
+      packed.text0 |= ((uint64_t)((c & 0xF) + 'A' - 0xA) << (8 * 6)); \
+    if ((c >> 4) <= 0x9) \
+      packed.text0 |= ((uint64_t)((c >> 4) + '0') << (8 * 5)); \
+    else \
+      packed.text0 |= ((uint64_t)((c >> 4) + 'A' - 0xA) << (8 * 5)); \
+    pState->pMessageBoxA(NULL, (const char *)&packed.text0, (const char *)&packed.text0, 0); \
+  } while (0) // `OP 0x??\0`.
+#else
 #define LOG_INSTRUCTION_NAME(x)
+#endif
 #define LOG_ENUM(x)
 #define LOG_REGISTER(x)
 #define LOG_U8(x)
@@ -2625,7 +2645,9 @@ void llshost_EvaluateCode(llshost_state_t *pState)
 
 
     default:
+#ifndef LS_DBG_MESSAGEBOX
       LOG_INSTRUCTION_NAME(INVALID_INSTRUCTION);
+#endif
       LOG_INFO_START();
       LOG_U8(*(pCodePtr - 1));
       LOG_INFO_END();
@@ -2854,6 +2876,25 @@ void llshost_Setup(llshost_state_t *pState)
 
   pState->pLoadLibrary = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
 
+#ifdef LS_DBG_MESSAGEBOX
+  typedef HMODULE (*LoadLibraryFunc)(const char *);
+  LoadLibraryFunc pLoadLibraryA = (LoadLibraryFunc)pState->pLoadLibrary;
+
+  x.text0 = 0x642E323372657355; // `User32.d`
+  x.text1 = 0x0000000000006C6C; // `ll\0\0\0\0\0\0`
+
+  HMODULE user32Dll = pLoadLibraryA((const char *)&x.text0);
+
+  x.text0 = 0x426567617373654D; // `MessageB`
+  x.text1 = 0x000000000041786F; // `oxA\0\0\0\0\0`
+
+  pState->pMessageBoxA = pGetProcAddress(user32Dll, (const char *)&x.text0);
+
+  x.text1 = 0x007964522041786F; // `oxA Rdy\0`
+
+  pState->pMessageBoxA(NULL, (const char *)&x.text0, (const char *)&x.text0, 0);
+#endif
+
   // Get `GetProcessHeap`.
   x.text0 = 0x65636F7250746547; // `GetProce`
   x.text1 = 0x0000706165487373; // `ssHeap\0\0`
@@ -2904,7 +2945,7 @@ void llshost_Setup(llshost_state_t *pState)
 
     pState->pHeapRealloc = pGetProcAddress(kernel32Dll, (const char *)&x.text0);
 
-    // Allocate Stack.
+    // Allocate Stack. (Yes, the stack is on the heap.)
     pState->pStack = pHeapAlloc(pState->pHeapHandle, 0, pState->stackSize);
   }
 }
@@ -2933,11 +2974,13 @@ __forceinline void llshost_Cleanup(llshost_state_t *pState)
 
 __forceinline void llshost_FindCode(llshost_state_t *pState)
 {
-  uint8_t *pCode = __readgsqword(0); // Replace with `lea (register or whatever pCode ends up in), [rip]`. (for rax: 48 8D 05 00 00 00 00), fill gaps with 0x90 (nop)
+  uint8_t *pCode = __readgsqword(0); // Replace with `lea (register or whatever pCode ends up in), [rip]`. (for rax: 48 8D 05 00 00 00 00), fill gaps with 0x90 (nop).
+  // For RAX: `65 48 8B 04 25 00 00 00 00   mov rax,qword ptr gs:[0]` -> `48 8D 05 00 00 00 00 90 90`.
+  // For RCX: `65 48 8B 0C 25 00 00 00 00   mov rcx,qword ptr gs:[0]` -> `48 8D 0D 00 00 00 00 90 90`.
 
   while (pState->pCallFuncShellcode == NULL)
   {
-    if (*(uint64_t *)pCode == 0x0F1F840000000000)
+    if (*(uint64_t *)pCode == 0x0000000000841F0F && ((uint64_t *)pCode)[1] == 0x9090909090909090)
       pState->pCallFuncShellcode = pCode + 8;
 
     ++pCode;
@@ -2965,7 +3008,6 @@ void llshost_position_independent()
   llshost_EvaluateCode(&state);
   llshost_Cleanup(&state);
 }
-
 
 uint64_t __lls__call_func(const uint64_t *pStack);
 

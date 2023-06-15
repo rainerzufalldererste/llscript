@@ -14,6 +14,9 @@ project(ProjectName)
 
   files { "src/**.c", "src/**.cpp", "src/**.h", "src/**.inl", "src/**rc" }
   files { "project.lua" }
+
+  links { "../builds/lib/llscript_host.lib" }
+  links { "../builds/lib/llscript_asm.lib" }
   
   includedirs { "src" }
 
