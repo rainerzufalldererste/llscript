@@ -1,10 +1,10 @@
 
 # llscript
 ## What is it?
-- A basic custom low level scripting language, with a run-time-environment that can be injected as Shellcode.
-- The compiled bytecode can simply be appended to the run-time-environment shellcode to be executed when injected.
+- A basic custom low level scripting language, with a runtime-environment that can be injected as Shellcode.
+- The compiled bytecode can simply be appended to the runtime-environment shellcode to be executed when injected.
 - Includes a compiler (written in C#), a command line debugger (with custom debug information format) and a shellcode executer.
-- Can also be used as a very small, easily integratable, embedded-friendly run-time-environment for scripts that needs low level access.
+- Can also be used as a very small, easily integratable, embedded-friendly runtime-environment for scripts that needs low level access.
 - Currently only works with Windows x64, but shouldn't be particularly hard to port.
 
 ## What can it do?
@@ -53,8 +53,8 @@ Successfully wrote byte code to 'bytecode.lls'.
 Compilation Succeeded.
 ```
 
-### Step 3: Append the Bytecode to the Run-Time-Environment Shellcode
-- Open the compiler output file `bytecode.lls` and the run-time-environment shellcode `script_host.bin` in a hex editor like [HxD](https://mh-nexus.de/en/hxd/).
+### Step 3: Append the Bytecode to the Runtime-Environment Shellcode
+- Open the compiler output file `bytecode.lls` and the runtime-environment shellcode `script_host.bin` in a hex editor like [HxD](https://mh-nexus.de/en/hxd/).
 - Create a new hex-file and first paste in the contents of `script_host.bin`. This section should end with the magic constant `37 6F 63 03 12 9E 71 31`.
 - Now paste in the contents of `bytecode.lls`. These should usually begin with `0E` (which is the op code `LLS_OP_STACK_INC_IMM`).
 - Save the file.
@@ -134,9 +134,11 @@ messageBoxA @ code base offset 331  (array<i8>) : 0x7FF50BC0014B
 ```
 
 ## How to integrate it with another application?
-Simply include the corresponding header, link to `script_host.lib` and start the run-time-environment with a pointer to the bytecode.
+Simply include the corresponding header, link to `script_host.lib` and start the runtime-environment with a pointer to the bytecode.
 
-```c++
+```c
+#include "llshost.h"
+
 llshost_state_t  state = {};
 state.pCode = your_compiled_byte_code;
 
@@ -150,18 +152,18 @@ llshost_from_state(&state);
 
 ## How to build it?
 - Clone the repo `git clone https://github.com/rainerzufalldererste/llscript.git`
-- Run `create_project.bat`, select `Visual Studio 2015` if you're trying to build the script host for shellcode (evenything newer will produce calls to `memcpy` even without the `crt`. If you're just planning to embed the script host in another application, any new Visual Studio version is fine. 
+- Run `create_project.bat`, select `Visual Studio 2015` if you're trying to build the script host for shellcode (everything newer will produce calls to `memcpy` even without the `crt`. If you're just planning to embed the script host in another application, any new Visual Studio version is fine. 
 
 If you just want to play with the debugger or compiler, you can simply use `MSBuild` or `Visual Studio` to build the project solution.
 
-If you want to create a shellcode version of a modified run-time-environment:
+If you want to create a shellcode version of a modified runtime-environment:
 
 - Build `llscript_asm` then `llscript_host` then `llscript_host_bin`. (Visual Studio sometimes gets confused about `llscript_asm`, so not relying on dependencies is probably a good idea)
 -   Extract the `.code` section via some dumping tool or simply open the binary in IDA, go to the last statement of the last symbol, and select everything upwards in the hex view, then paste that into a hex editor.
 - Now we need to patch the assembly, because getting the current `rip` isn't something that can be expressed in a position independent or overly complicated way in msvc afaik, so we'll need to replace the assembly generated for `uint8_t *pCode = __readgsqword(0);` with `lea <whatever register the compiler chose>, [rip]`.
--- if the register was `rax`, replace `65 48 8B 04 25 00 00 00 00` (`mov rax,qword ptr gs:[0]`) with `48 8D 05 00 00 00 00 90 90`.
--- if the register was `rax`, replace `65 48 8B 0C 25 00 00 00 00` (`mov rcx,qword ptr gs:[0]`) with `48 8D 0D 00 00 00 00 90 90`.
--- if the register was anything else, use the [defuse.ca online x64 assembler](https://defuse.ca/online-x86-assembler.htm) and assemble `lea <whatever register the compiler chose>, [rip]` and replace the corresponding code with whatever that says. Pad with `0x90` (`nop`).
+ - if the register was `rax`, replace `65 48 8B 04 25 00 00 00 00` (`mov rax,qword ptr gs:[0]`) with `48 8D 05 00 00 00 00 90 90`.
+ - if the register was `rax`, replace `65 48 8B 0C 25 00 00 00 00` (`mov rcx,qword ptr gs:[0]`) with `48 8D 0D 00 00 00 00 90 90`.
+ - if the register was anything else, use the [defuse.ca online x64 assembler](https://defuse.ca/online-x86-assembler.htm) and assemble `lea <whatever register the compiler chose>, [rip]` and replace the corresponding code with whatever that says. Pad with `0x90` (`nop`).
 - Lastly, append the magic constant (`37 6F 63 03 12 9E 71 31`) to the shellcode. The runtime-environment will search for this pattern when launched without code to find it's input.
 
 ## License
